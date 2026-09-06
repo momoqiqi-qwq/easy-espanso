@@ -1,0 +1,468 @@
+/* 全局样式 */
+/* :root { ... removed ... } */
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+  /* color: var(--text-color); */ /* 使用Tailwind body类替代 */
+  /* background-color: var(--background-color); */ /* 使用Tailwind body类替代 */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* 按钮样式 - 使用Tailwind类或者CSS变量 */
+button {
+  cursor: pointer;
+  /* padding: var(--spacing-2) var(--spacing-4); */ /* 由具体btn类处理 */
+  /* border: 1px solid transparent; */ /* 由具体btn类处理 */
+  border-radius: var(--radius); /* 使用shadcn变量 */
+  font-size: 0.875rem;
+  font-weight: 500;
+  /* transition: all var(--transition) ease-in-out; */ /* 使用Tailwind transition */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* gap: var(--spacing-2); */ /* 使用Tailwind gap */
+  line-height: 1.5;
+  outline: none;
+  position: relative;
+  overflow: hidden;
+}
+
+button:focus {
+  /* outline: 2px solid var(--primary-light); */ /* 使用Tailwind ring */
+  outline-offset: 2px;
+}
+
+/* button:active { ... } */ /* 移除或使用Tailwind active: */
+
+/* button:disabled { ... } */ /* 使用Tailwind disabled: */
+
+/* 主要按钮 - 使用Tailwind */
+/* .btn-primary { ... } */ /* 改为在组件中使用Tailwind类，如 'bg-primary text-primary-foreground hover:bg-primary/90' */
+
+/* 次要按钮 - 使用Tailwind */
+/* .btn-secondary { ... } */ /* 改为在组件中使用Tailwind类，如 'bg-secondary text-secondary-foreground hover:bg-secondary/80' */
+
+/* 危险按钮 - 使用Tailwind */
+/* .btn-danger { ... } */ /* 改为在组件中使用Tailwind类，如 'bg-destructive text-destructive-foreground hover:bg-destructive/90' */
+
+/* 文本按钮 - 使用Tailwind */
+/* .btn-text { ... } */ /* 改为在组件中使用Tailwind类，如 'text-primary hover:bg-accent hover:text-accent-foreground' */
+
+/* 图标按钮 - 使用Tailwind */
+/* .btn-icon { ... } */ /* 使用Tailwind类控制padding和圆角 */
+
+/* 按钮尺寸 - 使用Tailwind */
+/* .btn-sm { ... } */ /* 使用Tailwind类，如 'h-9 px-3' */
+/* .btn-lg { ... } */ /* 使用Tailwind类，如 'h-11 px-8' */
+
+/* 表单样式 */
+input, select, textarea {
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  font-size: 0.875rem;
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  width: 100%;
+}
+
+input::placeholder, textarea::placeholder {
+  color: var(--text-muted);
+}
+
+input:hover, select:hover, textarea:hover {
+  border-color: hsl(var(--border));
+}
+
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px var(--primary-light);
+}
+
+input:disabled, select:disabled, textarea:disabled {
+  background-color: var(--background-dark-color);
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+/* 复选框和单选框 */
+input[type="checkbox"], input[type="radio"] {
+  width: 1rem;
+  height: 1rem;
+  margin-right: var(--spacing-2);
+  accent-color: var(--primary-color);
+}
+
+/* 表单组 */
+.form-group {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: var(--spacing-4);
+}
+
+.form-group label {
+  font-weight: 500;
+  margin-bottom: var(--spacing-2);
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+
+.form-group .hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: var(--spacing-1);
+}
+
+.form-group.error input,
+.form-group.error select,
+.form-group.error textarea {
+  border-color: var(--danger-color);
+  box-shadow: 0 0 0 1px var(--danger-light);
+}
+
+.form-group .error-message {
+  color: var(--danger-color);
+  font-size: 0.75rem;
+  margin-top: var(--spacing-1);
+}
+
+/* 表单布局 */
+.form-row {
+  display: flex;
+  gap: var(--spacing-4);
+  margin-bottom: var(--spacing-4);
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--spacing-2);
+  margin-top: var(--spacing-6);
+}
+
+/* 辅助类 */
+.text-center { text-align: center; }
+.text-right { text-align: right; }
+.text-left { text-align: left; }
+
+/* 文本样式 */
+.text-sm { font-size: 0.875rem; }
+.text-xs { font-size: 0.75rem; }
+.text-lg { font-size: 1.125rem; }
+.text-xl { font-size: 1.25rem; }
+.text-2xl { font-size: 1.5rem; }
+
+.font-bold { font-weight: 700; }
+.font-medium { font-weight: 500; }
+.font-normal { font-weight: 400; }
+
+.text-primary { color: var(--primary-color); }
+.text-secondary { color: var(--text-secondary); }
+.text-muted { color: var(--text-muted); }
+.text-danger { color: var(--danger-color); }
+.text-success { color: var(--success-color); }
+
+/* Flexbox */
+.flex { display: flex; }
+.flex-col { flex-direction: column; }
+.flex-row { flex-direction: row; }
+.flex-wrap { flex-wrap: wrap; }
+.flex-grow { flex-grow: 1; }
+.flex-shrink-0 { flex-shrink: 0; }
+
+.items-center { align-items: center; }
+.items-start { align-items: flex-start; }
+.items-end { align-items: flex-end; }
+.items-stretch { align-items: stretch; }
+
+.justify-center { justify-content: center; }
+.justify-between { justify-content: space-between; }
+.justify-start { justify-content: flex-start; }
+.justify-end { justify-content: flex-end; }
+.justify-around { justify-content: space-around; }
+
+/* 间距 */
+.gap-1 { gap: var(--spacing-1); }
+.gap-2 { gap: var(--spacing-2); }
+.gap-3 { gap: var(--spacing-3); }
+.gap-4 { gap: var(--spacing-4); }
+.gap-6 { gap: var(--spacing-6); }
+.gap-8 { gap: var(--spacing-8); }
+
+.p-1 { padding: var(--spacing-1); }
+.p-2 { padding: var(--spacing-2); }
+.p-3 { padding: var(--spacing-3); }
+.p-4 { padding: var(--spacing-4); }
+.p-6 { padding: var(--spacing-6); }
+.p-8 { padding: var(--spacing-8); }
+
+.px-1 { padding-left: var(--spacing-1); padding-right: var(--spacing-1); }
+.px-2 { padding-left: var(--spacing-2); padding-right: var(--spacing-2); }
+.px-3 { padding-left: var(--spacing-3); padding-right: var(--spacing-3); }
+.px-4 { padding-left: var(--spacing-4); padding-right: var(--spacing-4); }
+
+.py-1 { padding-top: var(--spacing-1); padding-bottom: var(--spacing-1); }
+.py-2 { padding-top: var(--spacing-2); padding-bottom: var(--spacing-2); }
+.py-3 { padding-top: var(--spacing-3); padding-bottom: var(--spacing-3); }
+.py-4 { padding-top: var(--spacing-4); padding-bottom: var(--spacing-4); }
+
+.m-1 { margin: var(--spacing-1); }
+.m-2 { margin: var(--spacing-2); }
+.m-3 { margin: var(--spacing-3); }
+.m-4 { margin: var(--spacing-4); }
+.m-6 { margin: var(--spacing-6); }
+.m-8 { margin: var(--spacing-8); }
+
+.mx-1 { margin-left: var(--spacing-1); margin-right: var(--spacing-1); }
+.mx-2 { margin-left: var(--spacing-2); margin-right: var(--spacing-2); }
+.mx-3 { margin-left: var(--spacing-3); margin-right: var(--spacing-3); }
+.mx-4 { margin-left: var(--spacing-4); margin-right: var(--spacing-4); }
+.mx-auto { margin-left: auto; margin-right: auto; }
+
+.my-1 { margin-top: var(--spacing-1); margin-bottom: var(--spacing-1); }
+.my-2 { margin-top: var(--spacing-2); margin-bottom: var(--spacing-2); }
+.my-3 { margin-top: var(--spacing-3); margin-bottom: var(--spacing-3); }
+.my-4 { margin-top: var(--spacing-4); margin-bottom: var(--spacing-4); }
+
+.mt-1 { margin-top: var(--spacing-1); }
+.mt-2 { margin-top: var(--spacing-2); }
+.mt-4 { margin-top: var(--spacing-4); }
+.mb-1 { margin-bottom: var(--spacing-1); }
+.mb-2 { margin-bottom: var(--spacing-2); }
+.mb-4 { margin-bottom: var(--spacing-4); }
+
+/* 边框和圆角 */
+.rounded-sm { border-radius: var(--radius-sm); }
+.rounded { border-radius: var(--radius); }
+.rounded-md { border-radius: var(--radius-md); }
+.rounded-lg { border-radius: var(--radius-lg); }
+.rounded-full { border-radius: var(--radius-full); }
+
+.border { border: 1px solid hsl(var(--border)); }
+.border-t { border-top: 1px solid hsl(var(--border)); }
+.border-b { border-bottom: 1px solid hsl(var(--border)); }
+.border-l { border-left: 1px solid hsl(var(--border)); }
+.border-r { border-right: 1px solid hsl(var(--border)); }
+
+/* 阴影 */
+.shadow-sm { box-shadow: var(--shadow-sm); }
+.shadow { box-shadow: var(--shadow); }
+.shadow-md { box-shadow: var(--shadow-md); }
+.shadow-lg { box-shadow: var(--shadow-lg); }
+
+/* 布局 */
+.w-full { width: 100%; }
+.h-full { height: 100%; }
+.min-h-screen { min-height: 100vh; }
+
+.overflow-hidden { overflow: hidden; }
+.overflow-auto { overflow: auto; }
+.overflow-y-auto { overflow-y: auto; }
+.overflow-x-auto { overflow-x: auto; }
+
+.relative { position: relative; }
+.absolute { position: absolute; }
+.fixed { position: fixed; }
+.sticky { position: sticky; }
+
+.inset-0 { top: 0; right: 0; bottom: 0; left: 0; }
+.top-0 { top: 0; }
+.right-0 { right: 0; }
+.bottom-0 { bottom: 0; }
+.left-0 { left: 0; }
+
+/* 显示 */
+.hidden { display: none; }
+.block { display: block; }
+.inline-block { display: inline-block; }
+.inline { display: inline; }
+.grid { display: grid; }
+
+/* 加载状态 */
+.loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  color: var(--text-light-color);
+  position: relative;
+  min-height: 4rem;
+}
+
+.loading::after {
+  content: '';
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 2px solid hsl(var(--border));
+  border-top-color: var(--primary-color);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  position: absolute;
+}
+
+.loading-overlay {
+  position: absolute;
+  inset: 0;
+  background-color: hsl(var(--background) / 0.82);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 50;
+  backdrop-filter: blur(2px);
+}
+
+.loading-text {
+  margin-top: 2.5rem;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 卡片 - 使用语义主题变量，避免暗色模式出现白块 */
+.card {
+  background-color: hsl(var(--card));
+  color: hsl(var(--card-foreground));
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.card:hover {
+  box-shadow: var(--shadow-md);
+}
+
+.card-header {
+  padding: var(--spacing-4);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.card-body {
+  padding: var(--spacing-4);
+}
+
+.card-footer {
+  padding: var(--spacing-4);
+  border-top: 1px solid var(--border-color);
+  background-color: var(--background-light-color);
+}
+
+/* 徽章 */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--spacing-1) var(--spacing-2);
+  border-radius: var(--radius-full);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.badge-primary {
+  background-color: var(--primary-light);
+  color: var(--primary-color);
+}
+
+.badge-secondary {
+  background-color: var(--secondary-light);
+  color: var(--secondary-color);
+}
+
+.badge-success {
+  background-color: var(--success-light);
+  color: var(--success-color);
+}
+
+.badge-danger {
+  background-color: var(--danger-light);
+  color: var(--danger-color);
+}
+
+.badge-warning {
+  background-color: var(--warning-light);
+  color: var(--warning-color);
+}
+
+/* 分割线 */
+.divider {
+  height: 1px;
+  background-color: var(--divider-color);
+  margin: var(--spacing-4) 0;
+}
+
+.divider-vertical {
+  width: 1px;
+  height: 100%;
+  background-color: var(--divider-color);
+  margin: 0 var(--spacing-4);
+}
+
+/* 工具提示 */
+.tooltip {
+  position: relative;
+  display: inline-block;
+}
+
+.tooltip-text {
+  visibility: hidden;
+  background-color: hsl(var(--popover));
+  color: hsl(var(--popover-foreground));
+  text-align: center;
+  padding: var(--spacing-2) var(--spacing-3);
+  border-radius: var(--radius);
+  position: absolute;
+  z-index: 100;
+  bottom: 125%;
+  left: 50%;
+  transform: translateX(-50%);
+  opacity: 0;
+  transition: opacity var(--transition);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  box-shadow: var(--shadow-md);
+  pointer-events: none;
+}
+
+.tooltip:hover .tooltip-text {
+  visibility: visible;
+  opacity: 1;
+}
+
+/* 标题栏空间样式 */
+.middle-pane,
+.right-pane {
+  /* 为标题栏留出空间 */
+  padding-top: 0; /* 默认值，会被媒体查询覆盖 */
+}
+
+/* 在 macOS 上应用特定样式 */
+@media screen and (min-width: 768px) {
+  .middle-pane,
+  .right-pane {
+    padding-top: 0; /* macOS 标题栏高度已在主布局中处理 */
+  }
+}
+
+/* 在 Windows/Linux 上应用特定样式 */
+@media screen and (max-width: 767px) {
+  .middle-pane,
+  .right-pane {
+    padding-top: 0; /* Windows/Linux 标题栏高度已在主布局中处理 */
+  }
+}
+
+/* Scrollbar colors are centralized in global.css so every pane follows the active accent theme. */
+
+

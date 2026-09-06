@@ -1,0 +1,174 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* 亮色主题 - 更精致的颜色方案 */
+    --background: 210 40% 98%; /* 微蓝色调的白色背景 */
+    --foreground: 222.2 47.4% 11.2%; /* 深蓝灰色文本 */
+
+    --card: 0 0% 100%; /* 纯白色卡片 */
+    --card-foreground: 222.2 47.4% 11.2%; /* 同前景色 */
+
+    --popover: 0 0% 100%; /* 纯白色弹出框 */
+    --popover-foreground: 222.2 47.4% 11.2%; /* 同前景色 */
+
+    /* 主色调 - 优雅的蓝色 */
+    --primary: 224 76% 48%; /* 鲜明的蓝色 */
+    --primary-foreground: 210 40% 98%; /* 几乎白色的文本 */
+    --primary-gradient-start: 224 76% 48%; /* 同primary */
+    --primary-gradient-end: 226 71% 40%; /* 略深的蓝色 */
+    --primary-gradient-text: 210 40% 98%; /* 同primary-foreground */
+
+    /* 次要颜色 - 微妙的灰色 */
+    --secondary: 214 32% 91%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+
+    /* 静音色调 - 柔和的背景 */
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+
+    /* 强调色 - 微妙的灰蓝色 */
+    --accent: 214 32% 91%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+
+    /* 危险色 - 更柔和的红色 */
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    /* 边框和表单 - 更微妙但可见 */
+    --border: 214.3 31.8% 85%; /* 淡蓝灰色边框 */
+    --input: 214.3 31.8% 85%; /* 匹配边框 */
+    --ring: 224 76% 48%; /* 匹配主色调 */
+
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    /* 暗色主题 - 精致的深色调 */
+    --background: 222.2 47.4% 11.2%; /* 深蓝灰色背景 */
+    --foreground: 210 40% 98%; /* 几乎白色的文本 */
+
+    /* 卡片 - 略微淡一点的背景 */
+    --card: 222.2 47.4% 13.2%; /* 比背景略浅 */
+    --card-foreground: 210 40% 98%;
+
+    /* 弹出框 - 略微深一点的背景 */
+    --popover: 222.2 47.4% 9.2%; /* 比背景略深 */
+    --popover-foreground: 210 40% 98%;
+
+    /* 主色调 - 明亮但不刺眼的蓝色 */
+    --primary: 217.2 91.2% 59.8%; /* 明亮的蓝色 */
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --primary-gradient-start: 217.2 91.2% 59.8%; /* 同primary */
+    --primary-gradient-end: 215 90% 67%; /* 略淡的蓝色 */
+    --primary-gradient-text: 222.2 47.4% 11.2%; /* 同primary-foreground */
+
+    /* 次要颜色 - 暗蓝灰色 */
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+
+    /* 静音色调 - 深灰蓝色 */
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 75%; /* 更明亮的文本提高可读性 */
+
+    /* 强调色 - 深灰蓝色 */
+    --accent: 217.2 32.6% 22%; /* 比背景稍亮 */
+    --accent-foreground: 210 40% 98%;
+
+    /* 危险色 - 柔和的红色 */
+    --destructive: 0 62.8% 42.6%; /* 更亮的红色 */
+    --destructive-foreground: 210 40% 98%;
+
+    /* 边框和表单 - 深灰色带蓝色调 */
+    --border: 217.2 32.6% 22%; /* 可见但不刺眼的边框 */
+    --input: 217.2 32.6% 22%; /* 匹配边框 */
+    --ring: 217.2 91.2% 59.8%; /* 匹配主色调 */
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+/* User-selectable accent presets. These only override semantic theme tokens, so
+   existing components automatically inherit the chosen color. */
+:root[data-accent-color="blue"] {
+  --primary: 224 76% 48%;
+  --ring: 224 76% 48%;
+  --primary-gradient-start: 224 76% 48%;
+  --primary-gradient-end: 226 71% 40%;
+}
+:root.dark[data-accent-color="blue"] {
+  --primary: 217.2 91.2% 59.8%;
+  --ring: 217.2 91.2% 59.8%;
+  --primary-gradient-start: 217.2 91.2% 59.8%;
+  --primary-gradient-end: 215 90% 67%;
+}
+:root[data-accent-color="violet"] {
+  --primary: 262 83% 58%;
+  --ring: 262 83% 58%;
+  --primary-gradient-start: 262 83% 58%;
+  --primary-gradient-end: 274 87% 64%;
+}
+:root.dark[data-accent-color="violet"] {
+  --primary: 263 70% 64%;
+  --ring: 263 70% 64%;
+  --primary-gradient-start: 263 70% 64%;
+  --primary-gradient-end: 278 81% 70%;
+}
+:root[data-accent-color="cyan"] {
+  --primary: 190 90% 40%;
+  --ring: 190 90% 40%;
+  --primary-gradient-start: 190 90% 40%;
+  --primary-gradient-end: 199 89% 48%;
+}
+:root.dark[data-accent-color="cyan"] {
+  --primary: 189 94% 43%;
+  --ring: 189 94% 43%;
+  --primary-gradient-start: 189 94% 43%;
+  --primary-gradient-end: 199 89% 55%;
+}
+:root[data-accent-color="emerald"] {
+  --primary: 160 84% 39%;
+  --ring: 160 84% 39%;
+  --primary-gradient-start: 160 84% 39%;
+  --primary-gradient-end: 151 55% 42%;
+}
+:root.dark[data-accent-color="emerald"] {
+  --primary: 158 64% 52%;
+  --ring: 158 64% 52%;
+  --primary-gradient-start: 158 64% 52%;
+  --primary-gradient-end: 151 55% 58%;
+}
+:root[data-accent-color="amber"] {
+  --primary: 32 95% 44%;
+  --ring: 32 95% 44%;
+  --primary-gradient-start: 32 95% 44%;
+  --primary-gradient-end: 24 95% 53%;
+}
+:root.dark[data-accent-color="amber"] {
+  --primary: 38 92% 50%;
+  --ring: 38 92% 50%;
+  --primary-gradient-start: 38 92% 50%;
+  --primary-gradient-end: 27 96% 61%;
+}
+:root[data-accent-color="rose"] {
+  --primary: 347 77% 50%;
+  --ring: 347 77% 50%;
+  --primary-gradient-start: 347 77% 50%;
+  --primary-gradient-end: 330 81% 60%;
+}
+:root.dark[data-accent-color="rose"] {
+  --primary: 350 89% 60%;
+  --ring: 350 89% 60%;
+  --primary-gradient-start: 350 89% 60%;
+  --primary-gradient-end: 330 81% 68%;
+}

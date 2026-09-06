@@ -1,0 +1,423 @@
+<template>
+  <ContextMenu @update:open="handleContextMenuUpdate">
+    <ContextMenuTrigger>
+      <div
+        :class="{
+          /* 'outline outline-2 outline-offset-[-2px] outline-blue-700': isContextMenuOpen && !props.isSelected, */
+          /* 'outline outline-2 outline-offset-[-2px] outline-blue-300': isContextMenuOpen && props.isSelected, */
+          'outline outline-2 outline-offset-[-2px] outline-ring': isContextMenuOpen && !props.isSelected, /* Use theme ring color */
+          'outline outline-2 outline-offset-[-2px] outline-primary/50': isContextMenuOpen && props.isSelected, /* Use lighter primary for selected */
+        }"
+        class="w-full"
+      >
+        <slot></slot>
+      </div>
+    </ContextMenuTrigger>
+    <ContextMenuContent class="min-w-[12rem] !rounded-none">
+      <!-- Dynamically render menu items -->
+      <template v-for="(item, index) in computedMenuItems" :key="index">
+        <ContextMenuItem
+          v-if="item.show !== false"
+          @select="item.action"
+          :disabled="item.disabled"
+          :variant="item.variant"
+        >
+          <component v-if="item.icon" :is="item.icon" class="mr-2 h-4 w-4" />
+          <span>{{ item.label }}</span>
+          <ContextMenuShortcut v-if="item.shortcut">{{
+            item.shortcut
+          }}</ContextMenuShortcut>
+        </ContextMenuItem>
+        <ContextMenuSeparator
+          v-if="
+            item.separator &&
+            item.show !== false &&
+            computedMenuItems[index + 1]?.show !== false
+          "
+        />
+      </template>
+    </ContextMenuContent>
+  </ContextMenu>
+
+  <!-- 不再需要确认对话框 -->
+</template>
+
+<script setup lang="ts">
+import {
+  PlusIcon,
+  Trash2Icon,
+  ClipboardCopyIcon,
+  ClipboardPasteIcon,
+  ScissorsIcon,
+  PencilIcon,
+  ChevronsUpDownIcon,
+  ExternalLinkIcon,
+  FileIcon,
+  FolderOpen as FolderOpenIcon,
+  FolderPlus as FolderPlusIcon,
+} from "lucide-vue-next";
+import {
+  ContextMenu,
+  ContextMenuTrigger,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuShortcut,
+} from "@/components/ui/context-menu";
+import { useContextMenu } from "@/hooks/useContextMenu";
+import { ref, defineProps, defineEmits, computed } from "vue";
+import ClipboardManager from "@/utils/ClipboardManager";
+import type { TreeNodeItem } from "@/types/tree.types";
+import { useI18n } from "vue-i18n";
+
+const t = useI18n().t;
+
+// --- MenuItem Interface ---
+interface MenuItem {
+  label: string;
+  icon?: any;
+  action?: () => void;
+  separator?: boolean; // Indicates if a separator should follow this item
+  disabled?: boolean;
+  variant?: "destructive";
+  show?: boolean; // Controls visibility, defaults to true
+  shortcut?: string; // <-- Add shortcut property
+}
+
+// --- Props and Emits ---
+const props = defineProps<{
+  node: TreeNodeItem;
+  isSelected: boolean;
+}>();
+
+const emit = defineEmits<{
+  (e: "request-rename", item: TreeNodeItem): void;
+  (
+    e: "move",
+    payload: {
+      itemId: string;
+      oldParentId: string | null;
+      newParentId: string | null;
+      oldIndex: number;
+      newIndex: number;
+    }
+  ): void;
+}>();
+
+const isContextMenuOpen = ref(false);
+
+// 使用共享的上下文菜单逻辑
+const {
+  handleCopyNodePath,
+  handleCopyItem,
+  handleCutItem,
+  handlePasteItem,
+  handleCreateMatch,
+  handleCreateConfigFile,
+  handleCreatePackageFolder,
+  handleCreatePackageSnippet,
+  handleExpandAll,
+  handleCollapseAll,
+  handleOpenInExplorer,
+  prepareDeleteMatch,
+  prepareDeleteFile,
+  prepareDeleteFolder,
+} = useContextMenu({
+  getNode: () => props.node,
+});
+
+const handleContextMenuUpdate = (open: boolean) => {
+  isContextMenuOpen.value = open;
+};
+
+const handleRequestRename = () => {
+  emit("request-rename", props.node);
+};
+
+// 打开 Espanso 官方包网站
+const handleOpenPackageHub = async () => {
+  window.open("https://hub.espanso.org/", "_blank");
+};
+
+// --- Computed Properties ---
+// Helper to get Cmd or Ctrl symbol based on platform
+const getPlatformKey = (): string => {
+  if (typeof navigator !== "undefined") {
+    if (/Mac|iPod|iPhone|iPad/.test(navigator.userAgent)) {
+      return "⌘"; // Command symbol for macOS
+    }
+  }
+  return "Ctrl"; // Control symbol for Windows/Linux etc.
+};
+const platformKey = getPlatformKey(); // Get the key once
+
+// 获取删除快捷键提示
+const getDeleteShortcut = (): string => {
+  if (typeof navigator !== "undefined") {
+    if (/Mac|iPod|iPhone|iPad/.test(navigator.userAgent)) {
+      return "⌘+Del"; // macOS 删除快捷键
+    } else {
+      return "Del/Bksp"; // Windows/Linux 删除快捷键
+    }
+  }
+  return "Delete"; // Windows/Linux 删除快捷键
+};
+const deleteShortcut = getDeleteShortcut(); // Get the key once
+
+// --- Computed Menu Items ---
+const computedMenuItems = computed((): MenuItem[] => {
+  const type = props.node.type;
+  let items: MenuItem[] = [];
+
+
+  // --- Common Items (Top) ---
+  // 只有当节点是文件类型时才添加"新建片段"菜单项
+  if (type === 'file') {
+    items.push({
+      label: t('contextMenu.newSnippet'),
+      icon: PlusIcon,
+      action: handleCreateMatch,
+      separator: true,
+    });
+  }
+
+  // 检查是否是 Packages 相关节点。Windows 路径需要先统一分隔符。
+  const normalizedPath = (props.node.path || '').replace(/\\/g, '/').toLowerCase().replace(/\/$/, '');
+  const isPackageRoot = props.node.name.toLowerCase() === 'packages' || normalizedPath.endsWith('/packages');
+  const isPackageNode = isPackageRoot || normalizedPath.includes('/packages/');
+
+  // 只在文件夹类型下且不是 Packages 相关节点时添加"新建配置文件"菜单项
+  if (type === "folder" && !isPackageNode) {
+    items.push({
+      label: t('contextMenu.newConfigFile'),
+      icon: FileIcon,
+      action: handleCreateConfigFile,
+      separator: true,
+    });
+  }
+
+  if (type === "file") {
+    // 文件类型的菜单项
+    if (isPackageNode) {
+      // Packages 相关节点的文件菜单项
+      items.push(
+        {
+          label: t('contextMenu.copyPath'),
+          icon: ClipboardCopyIcon,
+          action: handleCopyNodePath,
+        },
+        {
+          label: t('contextMenu.pasteSnippet'),
+          icon: ClipboardPasteIcon,
+          action: handlePasteItem,
+          shortcut: `${platformKey}+V`,
+          separator: true,
+        },
+        { label: t('contextMenu.expandAll'), icon: ChevronsUpDownIcon, action: handleExpandAll },
+        {
+          label: t('contextMenu.collapseAll'),
+          icon: ChevronsUpDownIcon,
+          action: handleCollapseAll,
+          separator: true,
+        },
+        {
+          label: t('contextMenu.openInExplorer'),
+          icon: FolderOpenIcon,
+          action: handleOpenInExplorer,
+          separator: true,
+        },
+        {
+          label: t('contextMenu.browseOfficialPackages'),
+          icon: ExternalLinkIcon,
+          action: handleOpenPackageHub,
+          separator: true,
+        }
+      );
+    } else {
+      // 普通文件的菜单项
+      items.push(
+        { label: t('contextMenu.renameFile'), icon: PencilIcon, action: handleRequestRename },
+        {
+          label: t('contextMenu.copyPath'),
+          icon: ClipboardCopyIcon,
+          action: handleCopyNodePath,
+        },
+        {
+          label: t('contextMenu.pasteSnippet'),
+          icon: ClipboardPasteIcon,
+          action: handlePasteItem,
+          shortcut: `${platformKey}+V`,
+          separator: true,
+        },
+        { label: t('contextMenu.expandAll'), icon: ChevronsUpDownIcon, action: handleExpandAll },
+        {
+          label: t('contextMenu.collapseAll'),
+          icon: ChevronsUpDownIcon,
+          action: handleCollapseAll,
+          separator: true,
+        },
+        {
+          label: t('contextMenu.openInExplorer'),
+          icon: FolderOpenIcon,
+          action: handleOpenInExplorer,
+          separator: true,
+        },
+        {
+          label: t('contextMenu.deleteFile'),
+          icon: Trash2Icon,
+          action: prepareDeleteFile,
+          variant: "destructive",
+          shortcut: deleteShortcut,
+        }
+      );
+    }
+  } else if (type === "folder") {
+    // 文件夹类型的菜单项
+    if (isPackageNode) {
+      // Packages 相关节点的菜单项
+      if (isPackageRoot) {
+        items.push({
+          label: t('contextMenu.newPackage'),
+          icon: FolderPlusIcon,
+          action: handleCreatePackageFolder,
+          separator: true,
+        });
+      } else {
+        items.push({
+          label: t('contextMenu.newSnippet'),
+          icon: PlusIcon,
+          action: handleCreatePackageSnippet,
+          separator: true,
+        });
+      }
+      items.push(
+        {
+          label: t('contextMenu.copyPath'),
+          icon: ClipboardCopyIcon,
+          action: handleCopyNodePath,
+        },
+        {
+          label: t('contextMenu.pasteSnippet'),
+          icon: ClipboardPasteIcon,
+          action: handlePasteItem,
+          shortcut: `${platformKey}+V`,
+          separator: true,
+        },
+        { label: t('contextMenu.expandAll'), icon: ChevronsUpDownIcon, action: handleExpandAll },
+        {
+          label: t('contextMenu.collapseAll'),
+          icon: ChevronsUpDownIcon,
+          action: handleCollapseAll,
+          separator: true,
+        },
+        {
+          label: t('contextMenu.openInExplorer'),
+          icon: FolderOpenIcon,
+          action: handleOpenInExplorer,
+          separator: true,
+        },
+        {
+          label: t('contextMenu.browseOfficialPackages'),
+          icon: ExternalLinkIcon,
+          action: handleOpenPackageHub,
+          separator: true,
+        }
+      );
+
+      // 只有不是根 Packages 文件夹时才显示卸载选项
+      if (props.node.name !== "Packages") {
+        items.push({
+          label: t('contextMenu.uninstallPackage'),
+          icon: Trash2Icon,
+          action: prepareDeleteFolder,
+          variant: "destructive",
+          shortcut: deleteShortcut,
+        });
+      }
+    } else {
+      // 普通文件夹的菜单项
+      items.push(
+        { label: t('contextMenu.renameFolder'), icon: PencilIcon, action: handleRequestRename },
+        {
+          label: t('contextMenu.copyPath'),
+          icon: ClipboardCopyIcon,
+          action: handleCopyNodePath,
+        },
+        {
+          label: t('contextMenu.pasteSnippet'),
+          icon: ClipboardPasteIcon,
+          action: handlePasteItem,
+          shortcut: `${platformKey}+V`,
+          separator: true,
+        },
+        { label: t('contextMenu.expandAll'), icon: ChevronsUpDownIcon, action: handleExpandAll },
+        {
+          label: t('contextMenu.collapseAll'),
+          icon: ChevronsUpDownIcon,
+          action: handleCollapseAll,
+          separator: true,
+        },
+        {
+          label: t('contextMenu.openInExplorer'),
+          icon: FolderOpenIcon,
+          action: handleOpenInExplorer,
+          separator: true,
+        },
+        {
+          label: t('contextMenu.deleteFolder'),
+          icon: Trash2Icon,
+          action: prepareDeleteFolder,
+          variant: "destructive",
+          shortcut: deleteShortcut,
+        }
+      );
+    }
+  } else if (type === "match") {
+    // 匹配项类型的菜单项
+    items.push(
+      {
+        label: t('contextMenu.copySnippet'),
+        icon: ClipboardCopyIcon,
+        action: handleCopyItem,
+        shortcut: `${platformKey}+C`,
+      },
+      {
+        label: t('contextMenu.cutSnippet'),
+        icon: ScissorsIcon,
+        action: handleCutItem,
+        shortcut: `${platformKey}+X`,
+      },
+      {
+        label: t('contextMenu.pasteSnippet'),
+        icon: ClipboardPasteIcon,
+        action: handlePasteItem,
+        shortcut: `${platformKey}+V`,
+        separator: true,
+      },
+      {
+        label: t('contextMenu.openInExplorer'),
+        icon: FolderOpenIcon,
+        action: handleOpenInExplorer,
+        separator: true,
+      },
+      {
+        label: t('contextMenu.deleteSnippet'),
+        icon: Trash2Icon,
+        action: prepareDeleteMatch,
+        variant: "destructive",
+        shortcut: deleteShortcut,
+      }
+    );
+  }
+
+  return items;
+});
+</script>
+
+<style>
+/* 添加自定义样式以确保菜单项悬停效果更明显 */
+:deep(.context-menu-item:hover) {
+  background-color: hsl(var(--accent)); /* 使用主题变量 */
+  color: hsl(var(--accent-foreground)); /* 使用主题变量 */
+}
+</style>
