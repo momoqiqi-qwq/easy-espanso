@@ -51,6 +51,10 @@
                     :class="item.id === editingId && !isCreating ? 'text-primary' : 'text-foreground'">
                     {{ item.trigger }}
                   </h3>
+                  <span v-if="item.extraTriggers > 0"
+                    class="text-xs px-1.5 rounded bg-muted text-muted-foreground whitespace-nowrap">
+                    +{{ item.extraTriggers }}
+                  </span>
                   <div v-if="item.label" class="text-xs px-1.5 rounded truncate max-w-[120px]"
                     :class="item.id === editingId && !isCreating
                       ? 'bg-primary/10 text-primary'
@@ -126,8 +130,9 @@
                 <div class="flex items-center">
                   <Label for="ext-trigger" class="mr-2">{{ t('extensions.form.trigger') }} *</Label>
                 </div>
-                <Input id="ext-trigger" v-model="form.trigger" :placeholder="t('extensions.form.triggerPlaceholder')" />
-                <p class="text-xs text-muted-foreground">{{ t('extensions.form.triggerHint') }}</p>
+                <Textarea id="ext-trigger" v-model="form.trigger" rows="2"
+                  :placeholder="t('extensions.form.triggerMultiPlaceholder')" />
+                <p class="text-xs text-muted-foreground">{{ t('extensions.form.triggerMultiHint') }}</p>
               </div>
               <div class="space-y-1.5">
                 <Label for="ext-label">{{ t('extensions.form.label') }}</Label>
@@ -431,13 +436,19 @@ async function browseFolder() {
   }
 }
 
-// 识别"打开网页/打开文件夹"类片段：shell 变量的 cmd 以 start ""/explorer 开头
+// 识别"打开网页/打开文件夹"类片段：shell 变量的 cmd 以 start ""/explorer/Start-Process 开头
 function detectOpenKind(m: Match): 'web' | 'folder' | null {
   const v: any = (m.vars || []).find((x: any) => x && x.type === 'shell');
   if (!v) return null;
   const cmd = String(v.params?.cmd ?? '').trim();
   if (/^start\s+""\s+"/i.test(cmd)) return 'web';
   if (/^explorer\s+"/i.test(cmd)) return 'folder';
+  const sp = cmd.match(/^Start-Process\s+(.+)$/);
+  if (sp) {
+    // 网址 → 网页；其余路径 → 文件夹
+    const target = sp[1].trim().replace(/^['"]|['"]$/g, '');
+    return /^https?:\/\//i.test(target) || /^www\./i.test(target) ? 'web' : 'folder';
+  }
   return null;
 }
 
@@ -445,6 +456,7 @@ function detectOpenKind(m: Match): 'web' | 'folder' | null {
 interface ListItem {
   id: string;
   trigger: string;
+  extraTriggers: number;
   label: string;
   filePath: string;
   fileBase: string;
@@ -459,14 +471,18 @@ const listItems = computed<ListItem[]>(() =>
       // 命令行/脚本页排除"打开网页/文件夹"类片段
       return (m.vars || []).some((v: any) => v && v.type === extType.value) && !detectOpenKind(m);
     })
-    .map((m) => ({
-      id: m.id,
-      trigger: m.trigger || (m.triggers ? m.triggers[0] : '') || '',
-      label: m.label || '',
-      filePath: m.filePath || '',
-      fileBase: (m.filePath || '').split(/[\\/]/).pop() || '',
-      match: m,
-    })),
+    .map((m) => {
+      const triggerList = m.triggers && m.triggers.length ? m.triggers : [m.trigger || ''];
+      return {
+        id: m.id,
+        trigger: triggerList[0] || '',
+        extraTriggers: triggerList.length - 1,
+        label: m.label || '',
+        filePath: m.filePath || '',
+        fileBase: (m.filePath || '').split(/[\\/]/).pop() || '',
+        match: m,
+      };
+    }),
 );
 
 // configTree 中的 match 文件，用于"保存到"选择
@@ -543,22 +559,29 @@ const replaceHint = computed(() =>
 
 // 网页/文件夹参考文档里实时展示生成的 YAML（整段放在计算属性里，避免模板花括号转义问题）
 const openYamlPreview = computed(() => {
-  const trigger = form.value.trigger || (isWeb.value ? ':yt' : ':dl');
+  const lines = triggerLines.value;
   const varName = form.value.varName || 'output';
-  const cmd = isWeb.value
-    ? `start "" "${form.value.target || 'https://www.youtube.com/'}"`
-    : `explorer "${form.value.target || '%USERPROFILE%\\Downloads'}"`;
+  const built = buildOpenVar(form.value);
+  const cmd = String(built.params?.cmd ?? '');
+  const triggerPart = lines.length > 1
+    ? `triggers: [${lines.join(', ')}]`
+    : `trigger: ${lines[0] ?? ':yt'}`;
   return [
-    `- trigger: ${trigger}`,
+    `- ${triggerPart}`,
     `  replace: "{{${varName}}}"`,
     '  vars:',
     `    - name: ${varName}`,
     '      type: shell',
     '      params:',
-    '        shell: cmd',
+    `        shell: ${built.params?.shell}`,
     `        cmd: ${cmd}`,
   ].join('\n');
 });
+
+// 多行触发词：每行一个（映射到 espanso 的 triggers 列表）
+const triggerLines = computed(() =>
+  form.value.trigger.split('\n').map((s) => s.trim()).filter(Boolean),
+);
 
 // 右栏标题（同片段页：编辑片段 + 触发词副标题）
 const paneTitle = computed(() => {
@@ -578,7 +601,10 @@ function previewOf(m: Match): string {
   if (isOpenType.value) {
     const v: any = vars.find((x) => x && x.type === 'shell') ?? {};
     const cmd = String(v.params?.cmd ?? '');
-    const m2 = cmd.match(/^start\s+""\s+"(.*)"$/i) ?? cmd.match(/^explorer\s+"(.*)"$/i);
+    const m2 = cmd.match(/^start\s+""\s+"(.*)"$/i)
+      ?? cmd.match(/^explorer\s+"(.*)"$/i)
+      ?? cmd.match(/^Start-Process\s+'(.*)'$/)
+      ?? cmd.match(/^Start-Process\s+"(.*)"$/);
     return m2?.[1] || cmd || '-';
   }
   const v = vars.find((x) => x && x.type === extType.value) ?? {};
@@ -643,7 +669,9 @@ function cancelEdit() {
 
 function formFromMatch(m: Match): ExtFormState {
   const f = emptyForm();
-  f.trigger = m.trigger || (m.triggers ? m.triggers[0] : '') || '';
+  // 多触发词以换行展示（每行一个）
+  const triggerList = m.triggers && m.triggers.length ? m.triggers : (m.trigger ? [m.trigger] : []);
+  f.trigger = triggerList.join('\n');
   f.label = m.label || '';
   f.replace = m.replace || '{{output}}';
 
@@ -654,9 +682,11 @@ function formFromMatch(m: Match): ExtFormState {
     const v: any = vars.find((x) => x && x.type === 'shell') ?? {};
     f.varName = v.name || 'output';
     const cmd = String(v.params?.cmd ?? '').trim();
-    const webMatch = cmd.match(/^start\s+""\s+"(.*)"$/i);
-    const folderMatch = cmd.match(/^explorer\s+"(.*)"$/i);
-    f.target = webMatch?.[1] ?? folderMatch?.[1] ?? '';
+    const m2 = cmd.match(/^start\s+""\s+"(.*)"$/i)
+      ?? cmd.match(/^explorer\s+"(.*)"$/i)
+      ?? cmd.match(/^Start-Process\s+'(.*)'$/)
+      ?? cmd.match(/^Start-Process\s+"(.*)"$/);
+    f.target = m2?.[1] ?? '';
     return f;
   }
 
@@ -818,16 +848,29 @@ function applyTemplate(tpl: TemplateDef) {
 }
 
 // ==================== 保存/删除 ====================
+// %VAR% → $env:VAR（espanso 的 powershell 扩展不展开 cmd 风格环境变量）
+function toPsPath(path: string): string {
+  return path.replace(/%([^%]+)%/g, (_, name) => `$env:${name}`);
+}
+
+function buildOpenVar(f: ExtFormState): Record<string, any> {
+  // 去掉内嵌引号与结尾反斜杠，避免破坏引号配对（如 D:\ → \" 转义问题）
+  let target = f.target.trim().replace(/"+/g, '').replace(/[\\]+$/, '');
+  let quoted: string;
+  if (/%([^%]+)%/.test(target)) {
+    // 含环境变量的路径用双引号，PowerShell 运行时展开；路径含空格也安全
+    quoted = `"${toPsPath(target)}"`;
+  } else {
+    quoted = `'${target}'`;
+  }
+  // Start-Process 立即返回且由系统默认程序处理网址/文件夹，不会像 start 那样阻塞 shell 扩展
+  return { name: f.varName, type: 'shell', params: { shell: 'powershell', cmd: `Start-Process ${quoted}` } };
+}
+
 function buildVar(): Record<string, any> {
   const f = form.value;
-  if (isWeb.value) {
-    // 去掉内嵌引号与结尾反斜杠，避免破坏 cmd 引号配对（如 D:\ → \" 转义问题）
-    const target = f.target.trim().replace(/"+/g, '').replace(/[\\]+$/, '');
-    return { name: f.varName, type: 'shell', params: { shell: 'cmd', cmd: `start "" "${target}"` } };
-  }
-  if (isFolder.value) {
-    const target = f.target.trim().replace(/"+/g, '').replace(/[\\]+$/, '');
-    return { name: f.varName, type: 'shell', params: { shell: 'cmd', cmd: `explorer "${target}"` } };
+  if (isWeb.value || isFolder.value) {
+    return buildOpenVar(f);
   }
   if (isShell.value) {
     const params: Record<string, any> = { cmd: f.cmd, trim: f.trim };
@@ -843,7 +886,7 @@ function buildVar(): Record<string, any> {
 
 function validate(): string | null {
   const f = form.value;
-  if (!f.trigger.trim()) return t('extensions.form.required', { field: t('extensions.form.trigger') });
+  if (!triggerLines.value.length) return t('extensions.form.required', { field: t('extensions.form.trigger') });
   if (isWeb.value && !f.target.trim()) return t('extensions.form.required', { field: t('extensions.form.url') });
   if (isFolder.value && !f.target.trim()) return t('extensions.form.required', { field: t('extensions.form.folderPath') });
   if (isShell.value && !f.cmd.trim()) return t('extensions.form.required', { field: t('extensions.form.cmd') });
@@ -861,22 +904,25 @@ async function onSave() {
     toast.error(err);
     return;
   }
+  const lines = triggerLines.value;
+  const first = lines[0] ?? '';
   try {
     if (!isCreating.value && editingItem.value) {
       await store.updateMatch(editingItem.value.id, {
-        trigger: form.value.trigger.trim(),
+        trigger: first,
+        triggers: lines,
         label: form.value.label.trim() || undefined,
         replace: form.value.replace,
         vars: [buildVar()],
       } as any);
-      toast.success(`${form.value.trigger.trim()} ✓`);
+      toast.success(`${first} ✓`);
       form.value = formFromMatch(editingItem.value.match);
     } else {
       const target = matchFiles.value.find((f) => f.id === form.value.targetFileId);
       const created = await store.addItem(
         {
-          trigger: form.value.trigger.trim(),
-          triggers: [],
+          trigger: first,
+          triggers: lines,
           label: form.value.label.trim() || undefined,
           description: '',
           replace: form.value.replace,

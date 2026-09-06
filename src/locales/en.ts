@@ -112,6 +112,8 @@ export default {
       "trigger": "Trigger",
       "triggerPlaceholder": "e.g. :ip",
       "triggerHint": "When typed, espanso replaces it with the command/script output",
+      "triggerMultiPlaceholder": "e.g.\n:yt\n:youtube",
+      "triggerMultiHint": "Multiple triggers supported: one per line — any of them activates the snippet",
       "label": "Label (optional)",
       "labelPlaceholder": "e.g. Public IP lookup",
       "replace": "Replace content",

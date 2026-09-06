@@ -113,6 +113,8 @@ export default {
       "trigger": "触发词",
       "triggerPlaceholder": "例如: :ip",
       "triggerHint": "输入该触发词后，espanso 会将其替换为命令/脚本的输出",
+      "triggerMultiPlaceholder": "例如:\n:yt\n:youtube",
+      "triggerMultiHint": "支持多个触发词：每行填写一个，输入任意一个都会生效",
       "label": "名称（可选）",
       "labelPlaceholder": "例如: 查询公网 IP",
       "replace": "替换内容",
