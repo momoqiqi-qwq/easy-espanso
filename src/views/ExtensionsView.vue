@@ -18,7 +18,7 @@
         </div>
       </div>
 
-      <div class="flex-1 overflow-y-auto middle-pane-scrollbar p-3">
+      <div class="flex-1 overflow-y-auto middle-pane-scrollbar py-1">
         <!-- 空状态（与片段页同款居中样式） -->
         <div v-if="listItems.length === 0"
           class="flex flex-col justify-center items-center h-full text-muted-foreground text-center p-8">
@@ -33,48 +33,26 @@
           </Button>
         </div>
 
-        <!-- 列表项（片段列表卡片同款样式） -->
+        <!-- 紧凑单行列表：图标、触发词、标签 -->
         <template v-else>
-        <div v-for="item in listItems" :key="item.id"
-          :class="[
-            'group cursor-pointer border-l-2 rounded-md mb-2.5 transition-all bg-card shadow-xs border border-border/30',
-            item.id === editingId && !isCreating
-              ? 'border-l-primary shadow-sm bg-accent/10 border-primary/20'
-              : 'border-l-transparent hover:border-l-primary/40 hover:shadow-sm hover:bg-accent/5 hover:border-border/60'
-          ]"
-          @click="selectItem(item)">
-          <div class="py-2.5 px-3">
-            <div class="flex items-center gap-2">
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2 flex-wrap">
-                  <h3 class="text-sm font-medium m-0"
-                    :class="item.id === editingId && !isCreating ? 'text-primary' : 'text-foreground'">
-                    {{ item.trigger }}
-                  </h3>
-                  <span v-if="item.extraTriggers > 0"
-                    class="text-xs px-1.5 rounded bg-muted text-muted-foreground whitespace-nowrap">
-                    +{{ item.extraTriggers }}
-                  </span>
-                  <div v-if="item.label" class="text-xs px-1.5 rounded truncate max-w-[120px]"
-                    :class="item.id === editingId && !isCreating
-                      ? 'bg-primary/10 text-primary'
-                      : 'bg-muted text-muted-foreground'">
-                    {{ item.label }}
-                  </div>
-                </div>
-                <div class="text-xs truncate"
-                  :class="item.id === editingId && !isCreating ? 'text-foreground/90' : 'text-muted-foreground'">
-                  {{ previewOf(item.match) }}
-                </div>
-              </div>
-              <div class="flex gap-1 flex-shrink-0">
-                <Badge variant="outline" class="text-xs border-0 bg-muted/50 px-1.5 py-0 whitespace-nowrap">
-                  {{ item.fileBase }}
-                </Badge>
-              </div>
-            </div>
-          </div>
-        </div>
+          <button v-for="item in listItems" :key="item.id" type="button"
+            class="ext-list-row w-full flex items-center gap-1.5 px-3 py-1.5 text-left transition-colors"
+            :class="item.id === editingId && !isCreating
+              ? 'bg-[linear-gradient(135deg,#2b5876,#4e4376)] text-white'
+              : 'bg-card text-foreground hover:bg-accent hover:text-accent-foreground'"
+            :aria-pressed="item.id === editingId && !isCreating"
+            :title="[item.trigger, item.label, previewOf(item.match), item.fileBase].filter(Boolean).join('\n')"
+            @click="selectItem(item)">
+            <component :is="typeIcon" class="h-4 w-4 shrink-0"
+              :class="item.id === editingId && !isCreating ? 'text-white' : 'text-primary'" />
+            <span class="flex-1 min-w-0 truncate text-sm">{{ item.trigger }}</span>
+            <span v-if="item.extraTriggers > 0" class="shrink-0 text-xs opacity-80">+{{ item.extraTriggers }}</span>
+            <span class="min-w-0 max-w-[40%] shrink-0 truncate text-xs px-1.5 rounded"
+              :class="item.id === editingId && !isCreating ? 'bg-white/15 text-white' : 'bg-accent/50 text-muted-foreground'"
+              :title="item.label || item.fileBase">
+              {{ item.label || item.fileBase }}
+            </span>
+          </button>
         </template>
       </div>
     </aside>

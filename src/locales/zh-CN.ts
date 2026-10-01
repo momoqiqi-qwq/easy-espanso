@@ -1,4 +1,11 @@
 export default {
+  updates: {
+    title: '应用更新', current: '当前版本：{version}', check: '检查更新', checking: '正在检查…',
+    automatic: '启动时自动检查 GitHub Releases', failed: '更新检查或下载失败',
+    available: '发现新版本 {version}', latest: '当前已是最新版本', noRelease: '暂无正式发布版本，或更新仓库不可访问',
+    download: '下载', releases: '查看 GitHub Releases', downloadHint: '点击后通过系统浏览器下载安装包，下载完成后手动安装。',
+    noAssets: '该版本暂无安装包，请前往发布页面查看。',
+  },
   "greeting": "你好！",
   "installation": {
     "notDetected": "未检测到 Espanso",

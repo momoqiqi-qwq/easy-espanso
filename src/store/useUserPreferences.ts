@@ -30,6 +30,7 @@ export interface UserPreferences {
   sidebarSize: SidebarSize;
   showSidebarLabels: boolean;
   checkEspansoOnStartup: boolean;
+  checkUpdatesOnStartup: boolean;
   toastPosition: ToastPosition;
   toastDuration: ToastDuration;
   autoSave: boolean;
@@ -58,6 +59,7 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   sidebarSize: 'standard',
   showSidebarLabels: true,
   checkEspansoOnStartup: true,
+  checkUpdatesOnStartup: true,
   toastPosition: 'top-center',
   toastDuration: 2500,
   autoSave: true,
@@ -75,6 +77,7 @@ const DEFAULT_PREFERENCES: UserPreferences = {
 export const useUserPreferences = defineStore('userPreferences', () => {
   const sanitizePreferences = (input: Partial<UserPreferences>): UserPreferences => {
     const merged = { ...DEFAULT_PREFERENCES, ...input } as UserPreferences;
+    if (typeof merged.checkUpdatesOnStartup !== 'boolean') merged.checkUpdatesOnStartup = true;
     if (![90, 100, 110, 125, 150].includes(merged.fontScale)) merged.fontScale = DEFAULT_PREFERENCES.fontScale;
     if (!['blue', 'violet', 'cyan', 'emerald', 'amber', 'rose'].includes(merged.accentColor)) merged.accentColor = DEFAULT_PREFERENCES.accentColor;
     if (!['slim', 'standard', 'wide'].includes(merged.scrollbarSize)) merged.scrollbarSize = DEFAULT_PREFERENCES.scrollbarSize;
@@ -170,6 +173,7 @@ export const useUserPreferences = defineStore('userPreferences', () => {
       showSidebarLabels: DEFAULT_PREFERENCES.showSidebarLabels,
       hideUnsavedChangesWarning: DEFAULT_PREFERENCES.hideUnsavedChangesWarning,
       checkEspansoOnStartup: DEFAULT_PREFERENCES.checkEspansoOnStartup,
+      checkUpdatesOnStartup: DEFAULT_PREFERENCES.checkUpdatesOnStartup,
       toastPosition: DEFAULT_PREFERENCES.toastPosition,
       toastDuration: DEFAULT_PREFERENCES.toastDuration,
       autoSave: DEFAULT_PREFERENCES.autoSave,

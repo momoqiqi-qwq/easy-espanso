@@ -24,7 +24,6 @@ function createMatchNode(match: Match, t: Translate): TreeNodeItem {
   let displayName = match.trigger || '';
   if (!displayName && Array.isArray(match.triggers) && match.triggers.length > 0) {
     displayName = match.triggers[0];
-    if (match.triggers.length > 1) displayName += '...';
   } else if (!displayName) {
     displayName = t('snippets.noTrigger');
   }

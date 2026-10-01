@@ -1,4 +1,11 @@
 export default {
+  updates: {
+    title: 'Application updates', current: 'Current version: {version}', check: 'Check for updates', checking: 'Checking…',
+    automatic: 'Check GitHub Releases on startup', failed: 'Update check or download failed',
+    available: 'New version {version} available', latest: 'You are up to date', noRelease: 'No stable release available, or the repository is inaccessible',
+    download: 'Download', releases: 'View GitHub Releases', downloadHint: 'Downloads open in your system browser. Install the package manually after downloading.',
+    noAssets: 'No installation packages available. See the release page for details.',
+  },
   "greeting": "Hello!",
   "installation": {
     "notDetected": "Espanso Not Detected",

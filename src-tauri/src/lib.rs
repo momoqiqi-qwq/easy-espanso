@@ -845,6 +845,25 @@ fn get_executable_under_cursor() -> Result<String, String> {
     { Err("拖动准星识别程序当前仅支持 Windows".into()) }
 }
 
+/// Fixed public release endpoint; native HTTP avoids WebView CORS restrictions.
+#[tauri::command]
+async fn get_latest_release() -> Result<Option<Value>, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .user_agent(concat!("easy-espanso/", env!("CARGO_PKG_VERSION")))
+        .build().map_err(|e| e.to_string())?;
+    let response = client.get("https://api.github.com/repos/momoqiqi-qwq/easy-espanso/releases/latest")
+        .header("Accept", "application/vnd.github+json")
+        .send().await.map_err(|e| e.to_string())?;
+    match response.status().as_u16() {
+        404 => return Ok(None),
+        403 | 429 => return Err("GitHub 请求受限，请稍后重试".into()),
+        _ => {}
+    }
+    let response = response.error_for_status().map_err(|e| e.to_string())?;
+    response.json::<Value>().await.map(Some).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -857,7 +876,7 @@ pub fn run() {
             rename_file_or_directory, join_path, get_platform, get_environment_variable,
             parse_yaml, serialize_yaml, get_espanso_status, control_espanso, open_in_explorer,
             get_executable_under_cursor, export_espanso_backup, import_espanso_backup,
-            get_app_icon_base64
+            get_app_icon_base64, get_latest_release
         ])
         .run(tauri::generate_context!())
         .expect("error while running Easy Espanso");

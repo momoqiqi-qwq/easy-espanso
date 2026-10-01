@@ -118,7 +118,7 @@
           >
 
 
-            <span class="inline-block"
+            <span class="inline-block shrink-0"
             :style="{
               width: `calc(${nodeLevel} * var(--easy-tree-indent, 20px) + 16px)`,
               '--node-level': nodeLevel,
@@ -135,11 +135,11 @@
             <ZapIcon
               v-else
               :class="[
-                'h-4 w-4 mr-1',
+                'h-4 w-4 mr-1 shrink-0',
                 isSelected ? 'text-white' : 'text-primary',
               ]"
             />
-            <span class="match-drag-handle text-sm cursor-grab flex-grow text-foreground select-none" :class="{ 'text-white': isSelected }">
+            <span class="match-drag-handle text-sm cursor-grab flex-1 min-w-0 truncate text-foreground select-none" :class="{ 'text-white': isSelected }" :title="node.match?.triggers?.join('\n') || node.name">
               <HighlightText
                 v-if="searchQuery"
                 :text="node.name"
@@ -147,12 +147,15 @@
               />
               <template v-else>{{ node.name }}</template>
             </span>
+            <span v-if="(node.match?.triggers?.length || 0) > 1" class="shrink-0 mx-1 text-xs text-muted-foreground" :class="{ 'text-white/80': isSelected }" :title="node.match?.triggers?.join('\n')">
+              +{{ (node.match?.triggers?.length || 1) - 1 }}
+            </span>
             <div
               v-if="node.match?.description && userPreferences.preferences.showMatchDescriptions"
-              class="ml-auto flex-1 text-right"
+              class="ml-2 min-w-0 max-w-[35%] shrink text-right"
             >
               <span
-                class="text-xs truncate max-w-[200px] inline-block"
+                class="text-xs truncate max-w-full block"
                 :class="{ 'text-white/80': isSelected, 'text-muted-foreground': !isSelected }"
                 :title="node.match.description"
               >
@@ -166,10 +169,10 @@
             </div>
             <div
               v-if="node.match?.label"
-              class="mr-2 flex-shrink-0"
+              class="ml-2 mr-2 min-w-0 max-w-[40%] shrink-0"
             >
               <div
-                class="text-xs px-1.5 min-w-[20px] h-[18px] overflow-hidden whitespace-nowrap text-ellipsis max-w-[120px]"
+                class="text-xs px-1.5 min-w-[20px] h-[18px] overflow-hidden whitespace-nowrap text-ellipsis"
                 :class="{
                   'bg-white/15 text-white border-white/10 border': isSelected,
                   'bg-accent/50 text-muted-foreground border-0': !isSelected

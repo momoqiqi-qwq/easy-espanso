@@ -1,5 +1,6 @@
 <template>
   <div class="settings-view bg-background">
+    <AppUpdatePanel />
     <!-- 加载状态 -->
     <div v-if="!isConfigLoaded && !loadError" class="loading-view">
       <div class="spinner"></div>
@@ -1240,6 +1241,7 @@ import {
 } from "@/components/ui/tooltip";
 import { Separator } from "../components/ui/separator";
 import EspansoToolsPanel from '@/components/settings/EspansoToolsPanel.vue';
+import AppUpdatePanel from '@/components/settings/AppUpdatePanel.vue';
 import type { AccentColor, FontScale, ScrollbarSize, ToastDuration, ToastPosition, HistoryLimit } from '@/store/useUserPreferences';
 import * as workspaceService from '@/services/workspaceService';
 import * as platformService from '@/services/platformService';

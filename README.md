@@ -34,6 +34,14 @@
 
 ## ✨ 特色功能
 
+### 应用更新（GitHub Releases）
+
+启动时默认在后台检查 `momoqiqi-qwq/easy-espanso` 的最新正式 Release，发现更高版本后显示提示。设置页顶部可关闭自动检测、手动检查、查看版本说明，并通过系统浏览器下载安装包；下载完成后手动安装。
+
+发布时同步修改 `package.json`、`src-tauri/Cargo.toml` 和 `src-tauri/tauri.conf.json` 的版本，推送对应的 `vX.Y.Z` tag。GitHub Actions 会构建三个平台的安装包并上传到 Release 草稿，待构建完成、检查附件后手动发布。草稿和预发布版本不会触发更新提示；没有正式 Release 或仓库不可访问时显示对应状态。
+
+更新逻辑回归检查：`node scripts/test-updates.mjs`。
+
 **已实现:**
 
 * **配置加载与解析:** 自动检测或手动选择 Espanso 配置目录，加载并解析 `match/` 和 `config/default.yml` 文件。
