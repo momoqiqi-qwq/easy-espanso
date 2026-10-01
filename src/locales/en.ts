@@ -112,7 +112,6 @@ export default {
       "trigger": "Trigger",
       "triggerPlaceholder": "e.g. :ip",
       "triggerHint": "When typed, espanso replaces it with the command/script output",
-      "triggerMultiPlaceholder": "e.g.\n:yt\n:youtube",
       "triggerMultiHint": "Multiple triggers supported: one per line — any of them activates the snippet",
       "label": "Label (optional)",
       "labelPlaceholder": "e.g. Public IP lookup",
@@ -135,6 +134,9 @@ export default {
       "modeInline": "Inline code",
       "program": "Interpreter",
       "programPlaceholder": "python",
+      "programMenuLabel": "Common interpreters",
+      "programNoMatch": "No matching common interpreter — type a custom one",
+      "scriptFiles": "Script files",
       "scriptPath": "Script path",
       "scriptPathPlaceholder": "%CONFIG%/scripts/script.py",
       "scriptPathHint": "%CONFIG% is replaced with the espanso config directory; keep scripts in the scripts folder for portability",
@@ -630,5 +632,35 @@ export default {
     "never": "Never",
     "snippets": "snippets",
     "files": "files"
+  },
+  "commandPalette": {
+    "placeholder": "Search commands, snippets or files…",
+    "empty": "Nothing matched",
+    "moreTriggers": "{n} more triggers",
+    "groups": {
+      "command": "Commands",
+      "match": "Snippets",
+      "file": "Config files"
+    },
+    "cmd": {
+      "snippets": "Snippet manager",
+      "snippetsHint": "Open the snippet editor",
+      "apps": "App profiles",
+      "appsHint": "Manage config/*.yml application rules",
+      "settings": "Settings",
+      "settingsHint": "Open Easy Espanso settings",
+      "undo": "Undo",
+      "undoEmpty": "Nothing to undo",
+      "redo": "Redo",
+      "redoEmpty": "Nothing to redo",
+      "open": "Reveal config folder in file manager",
+      "openEmpty": "No workspace selected",
+      "restart": "Restart Espanso",
+      "restartHint": "Reload the configuration by restarting the service",
+      "expand": "Expand all",
+      "expandHint": "Expand the configuration tree",
+      "collapse": "Collapse all",
+      "collapseHint": "Collapse the configuration tree"
+    }
   }
 }

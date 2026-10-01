@@ -573,14 +573,22 @@ export const useEspansoStore = defineStore('espanso', () => {
         const result = findItemInTreeById(state.value.configTree, matchId);
         if (!result || result.type !== 'match') {
             _setError(`Match with ID ${matchId} not found.`);
-            return;
+            throw new Error(`Match with ID ${matchId} not found.`);
         }
         const matchRef = result as Match; // Reference in the tree
         const filePath = matchRef.filePath;
         if (!filePath) {
              _setError(`Match ${matchId} is missing file path.`);
-             return;
+             throw new Error(`Match ${matchId} is missing file path.`);
         }
+
+        const previousValues = Object.fromEntries(
+            Object.keys(updates).map(key => {
+                const value = (matchRef as any)[key];
+                return [key, value === undefined ? undefined : JSON.parse(JSON.stringify(value))];
+            })
+        );
+        const previousUpdatedAt = matchRef.updatedAt;
 
         // 标记节点为已修改状态
         markNodeAsModified(matchId);
@@ -594,8 +602,11 @@ export const useEspansoStore = defineStore('espanso', () => {
 
             // 标记节点为已保存状态
             markNodeAsSaved(matchId);
-        } catch {
-            // _saveFileByPath already sets the error
+        } catch (err) {
+            // _saveFileByPath already sets the error; propagate it so editors retain unsaved data.
+            Object.assign(matchRef, previousValues);
+            matchRef.updatedAt = previousUpdatedAt;
+            throw err;
         }
     };
 
@@ -688,7 +699,13 @@ export const useEspansoStore = defineStore('espanso', () => {
             }
 
             // 6. 保存包含新片段的文件
-            await _saveFileByPath(finalTargetFilePath); // 使用确定的路径
+            try {
+                await _saveFileByPath(finalTargetFilePath); // 使用确定的路径
+            } catch (err) {
+                const insertedIndex = finalTargetFileNode.matches.indexOf(newItem);
+                if (insertedIndex !== -1) finalTargetFileNode.matches.splice(insertedIndex, 1);
+                throw err;
+            }
 
             // 7. 选中新创建的项
             selectItem(newItem.id, newItem.type);

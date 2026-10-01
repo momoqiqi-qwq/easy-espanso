@@ -130,8 +130,7 @@
                 <div class="flex items-center">
                   <Label for="ext-trigger" class="mr-2">{{ t('extensions.form.trigger') }} *</Label>
                 </div>
-                <Textarea id="ext-trigger" v-model="form.trigger" rows="2"
-                  :placeholder="t('extensions.form.triggerMultiPlaceholder')" />
+                <Textarea id="ext-trigger" v-model="form.trigger" rows="2" />
                 <p class="text-xs text-muted-foreground">{{ t('extensions.form.triggerMultiHint') }}</p>
               </div>
               <div class="space-y-1.5">
@@ -222,11 +221,42 @@
             <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div class="space-y-1.5">
                 <Label for="ext-program">{{ t('extensions.form.program') }} *</Label>
-                <Input id="ext-program" v-model="form.program" :placeholder="t('extensions.form.programPlaceholder')" />
+                <div ref="programMenuRoot" class="relative">
+                  <Input id="ext-program" v-model="form.program" autocomplete="off" spellcheck="false"
+                    class="pr-8" :placeholder="t('extensions.form.programPlaceholder')"
+                    @focus="programMenuOpen = true"
+                    @input="programMenuOpen = true"
+                    @keydown.esc="programMenuOpen = false" />
+                  <button type="button" tabindex="-1" :aria-label="t('extensions.form.programMenuLabel')"
+                    class="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded text-muted-foreground hover:text-foreground focus:outline-none"
+                    @click.stop="toggleProgramMenu">
+                    <ChevronDownIcon class="h-4 w-4 transition-transform" :class="programMenuOpen ? 'rotate-180' : ''" />
+                  </button>
+                  <!-- 常用解释器下拉 -->
+                  <div v-if="programMenuOpen"
+                    class="absolute z-30 left-0 right-0 top-full mt-1 max-h-64 overflow-y-auto rounded-md border border-border bg-popover text-popover-foreground shadow-lg py-1">
+                    <button v-for="r in filteredRunners" :key="r.value" type="button"
+                      class="w-full text-left px-3 py-1.5 text-sm flex items-center justify-between gap-2 hover:bg-accent focus:bg-accent focus:outline-none"
+                      :class="form.program === r.value ? 'bg-accent/60' : ''"
+                      @mousedown.prevent @click="pickProgram(r.value)">
+                      <span class="font-mono">{{ r.value }}</span>
+                      <span class="text-xs text-muted-foreground shrink-0">{{ r.hint }}</span>
+                    </button>
+                    <div v-if="filteredRunners.length === 0"
+                      class="px-3 py-2 text-xs text-muted-foreground">{{ t('extensions.form.programNoMatch') }}</div>
+                  </div>
+                </div>
               </div>
               <div v-if="form.mode === 'file'" class="space-y-1.5 md:col-span-2">
                 <Label for="ext-path">{{ t('extensions.form.scriptPath') }} *</Label>
-                <Input id="ext-path" v-model="form.scriptPath" :placeholder="t('extensions.form.scriptPathPlaceholder')" />
+                <div class="flex gap-2">
+                  <Input id="ext-path" v-model="form.scriptPath" spellcheck="false" class="flex-1 min-w-0"
+                    :placeholder="t('extensions.form.scriptPathPlaceholder')" />
+                  <Button type="button" variant="outline" class="shrink-0" @click="browseScriptFile">
+                    <FileCodeIcon class="h-4 w-4 mr-1" />
+                    {{ t('extensions.form.browse') }}
+                  </Button>
+                </div>
                 <p class="text-xs text-muted-foreground">{{ t('extensions.form.scriptPathHint') }}</p>
               </div>
             </div>
@@ -370,8 +400,8 @@ matches:
 </style>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
-import { useRoute } from 'vue-router';
+import { computed, ref, watch, onBeforeUnmount } from 'vue';
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { toast } from 'vue-sonner';
 import {
@@ -383,8 +413,10 @@ import {
   PlusIcon,
   SaveIcon,
   TrashIcon,
+  ChevronDownIcon,
 } from 'lucide-vue-next';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
+import * as platformService from '@/services/platformService';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Textarea } from '../components/ui/textarea';
@@ -399,10 +431,12 @@ import {
   SelectValue,
 } from '../components/ui/select';
 import { useEspansoStore } from '../store/useEspansoStore';
+import { useUserPreferences } from '../store/useUserPreferences';
 import type { Match } from '../types/core/espanso.types';
 
 const { t } = useI18n();
 const store = useEspansoStore();
+const userPreferences = useUserPreferences();
 const route = useRoute();
 
 // 四个路由共用本组件：/shell、/scripts、/web、/folders
@@ -434,6 +468,110 @@ async function browseFolder() {
   } catch {
     // 用户取消或对话框不可用
   }
+}
+
+// ==================== 常用解释程序下拉 ====================
+// 值会写进 program 字段；用户仍可手动输入任意命令
+const COMMON_RUNNERS: { value: string; hint: string }[] = [
+  { value: 'python', hint: '.py' },
+  { value: 'python3', hint: '.py' },
+  { value: 'py', hint: '.py (Windows)' },
+  { value: 'pwsh', hint: '.ps1' },
+  { value: 'powershell', hint: '.ps1' },
+  { value: 'cmd', hint: '.bat / .cmd' },
+  { value: 'bash', hint: '.sh' },
+  { value: 'sh', hint: '.sh' },
+  { value: 'node', hint: '.js / .mjs' },
+  { value: 'deno', hint: '.ts / .js' },
+  { value: 'ruby', hint: '.rb' },
+  { value: 'perl', hint: '.pl' },
+  { value: 'php', hint: '.php' },
+  { value: 'lua', hint: '.lua' },
+];
+
+const programMenuRoot = ref<HTMLElement | null>(null);
+const programMenuOpen = ref(false);
+
+// 输入内容过滤：只显示与当前输入匹配的常用项；为空则全列出
+const filteredRunners = computed(() => {
+  const q = form.value.program.trim().toLowerCase();
+  if (!q) return COMMON_RUNNERS;
+  return COMMON_RUNNERS.filter(
+    (r) => r.value.toLowerCase().includes(q) || r.hint.toLowerCase().includes(q),
+  );
+});
+
+function toggleProgramMenu() {
+  programMenuOpen.value = !programMenuOpen.value;
+}
+
+function pickProgram(value: string) {
+  form.value.program = value;
+  programMenuOpen.value = false;
+}
+
+// 点击组件外部时关闭下拉
+function onProgramMenuPointerDown(e: PointerEvent) {
+  if (!programMenuRoot.value?.contains(e.target as Node)) {
+    programMenuOpen.value = false;
+  }
+}
+
+// 仅在菜单打开期间挂全局监听，避免关闭状态下每次 pointerdown 都做命中判断
+watch(programMenuOpen, (open) => {
+  if (open) document.addEventListener('pointerdown', onProgramMenuPointerDown);
+  else document.removeEventListener('pointerdown', onProgramMenuPointerDown);
+});
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', onProgramMenuPointerDown);
+});
+
+// ==================== 脚本文件浏览 ====================
+// 选择脚本文件；位于 espanso 配置目录内时自动写成 %CONFIG%/… 相对形式
+async function browseScriptFile() {
+  try {
+    const configRoot = store.state.configRootDir;
+    let defaultDir: string | undefined;
+    if (configRoot) {
+      // 优先默认到配置目录的 scripts 子目录（若已存在）
+      const scriptsDir = await platformService.joinPath(configRoot, 'scripts');
+      if (await platformService.directoryExists(scriptsDir)) defaultDir = scriptsDir;
+      else defaultDir = configRoot;
+    }
+    const sel = await openDialog({
+      directory: false,
+      multiple: false,
+      title: t('extensions.form.browse'),
+      defaultPath: defaultDir,
+      filters: [
+        {
+          name: t('extensions.form.scriptFiles'),
+          extensions: ['py', 'pyw', 'ps1', 'bat', 'cmd', 'sh', 'bash', 'zsh', 'js', 'mjs', 'cjs', 'ts', 'rb', 'pl', 'php', 'lua'],
+        },
+      ],
+    });
+    if (typeof sel === 'string' && sel) {
+      form.value.scriptPath = toConfigRelativePath(sel, configRoot);
+    }
+  } catch {
+    // 用户取消或对话框不可用
+  }
+}
+
+// 绝对路径 → %CONFIG%/相对路径（仅当位于配置目录内），否则原样返回（统一为 / 分隔）
+function toConfigRelativePath(absPath: string, configRoot: string | null | undefined): string {
+  if (!configRoot) return absPath;
+  const norm = (p: string) => p.replace(/[\\/]+/g, '/').replace(/\/+$/, '');
+  const root = norm(configRoot);
+  const file = norm(absPath);
+  if (!file || file === root) return absPath;
+  const lowerRoot = root.toLowerCase();
+  const lowerFile = file.toLowerCase();
+  if (lowerFile.startsWith(lowerRoot + '/')) {
+    const rel = file.slice(root.length).replace(/^\/+/, '');
+    return `%CONFIG%/${rel}`;
+  }
+  return absPath;
 }
 
 // 识别"打开网页/打开文件夹"类片段：shell 变量的 cmd 以 start ""/explorer/Start-Process 开头
@@ -546,6 +684,20 @@ const editingId = ref<string | null>(null);
 const hasEditedAnyField = ref(false);
 const confirmingDelete = ref(false);
 let deleteConfirmTimer: ReturnType<typeof setTimeout> | null = null;
+let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
+let savePromise: Promise<boolean> | null = null;
+let savedForm = '';
+
+function clearAutoSaveTimer() {
+  if (autoSaveTimer) clearTimeout(autoSaveTimer);
+  autoSaveTimer = null;
+}
+
+function setForm(value: ExtFormState) {
+  clearAutoSaveTimer();
+  form.value = value;
+  savedForm = JSON.stringify(value);
+}
 
 const editingItem = computed(() =>
   editingId.value ? listItems.value.find((i) => i.id === editingId.value)?.match ?? null : null,
@@ -631,40 +783,61 @@ watch(
 );
 
 // 输入过任何字段后不再自动套模板视图（避免打断编辑）
-watch(form, () => { hasEditedAnyField.value = true; }, { deep: true });
+watch(form, () => {
+  if (JSON.stringify(form.value) === savedForm) return;
+  hasEditedAnyField.value = true;
+  if ((!isCreating.value && !editingId.value) || !userPreferences.preferences.autoSave) return;
+  clearAutoSaveTimer();
+  if (JSON.stringify(form.value) !== savedForm && !validate() && !varNameError.value) {
+    autoSaveTimer = setTimeout(() => { void saveCurrent(false); }, 600);
+  }
+}, { deep: true });
+
+// 路由复用同一个组件；离开前提交旧页面的数据，避免用新页面类型构造变量。
+onBeforeRouteUpdate(async () => await saveCurrent(false, true));
+onBeforeRouteLeave(async () => await saveCurrent(false, true));
+onBeforeUnmount(clearAutoSaveTimer);
 
 // 切换页面（shell <-> script）时重置状态；两个路由共用组件
 watch(extType, () => {
   isCreating.value = false;
   editingId.value = null;
-  form.value = emptyForm();
+  setForm(emptyForm());
   hasEditedAnyField.value = false;
+  // 解释器下拉只在脚本页存在，切页后组件不卸载，需一并收起
+  programMenuOpen.value = false;
 });
 
-function selectItem(item: ListItem) {
+async function selectItem(item: ListItem) {
+  if (editingId.value === item.id && !isCreating.value) return;
+  if (!await saveCurrent(false, true)) return;
   isCreating.value = false;
   confirmingDelete.value = false;
   editingId.value = item.id;
-  form.value = formFromMatch(item.match);
+  setForm(formFromMatch(item.match));
 }
 
-function startCreate() {
+async function startCreate() {
+  if (!await saveCurrent(false, true)) return;
   editingId.value = null;
   isCreating.value = true;
-  hasEditedAnyField.value = false;
   confirmingDelete.value = false;
-  form.value = emptyForm();
+  const nextForm = emptyForm();
   if (matchFiles.value.length) {
     const base = matchFiles.value.find((f) => /base\.ya?ml$/i.test(f.path));
-    form.value.targetFileId = (base ?? matchFiles.value[0]).id;
+    nextForm.targetFileId = (base ?? matchFiles.value[0]).id;
   }
+  setForm(nextForm);
+  hasEditedAnyField.value = false;
 }
 
-function cancelEdit() {
+async function cancelEdit() {
+  clearAutoSaveTimer();
+  if (savePromise) await savePromise;
   isCreating.value = false;
   editingId.value = null;
   confirmingDelete.value = false;
-  form.value = emptyForm();
+  setForm(emptyForm());
 }
 
 function formFromMatch(m: Match): ExtFormState {
@@ -867,12 +1040,11 @@ function buildOpenVar(f: ExtFormState): Record<string, any> {
   return { name: f.varName, type: 'shell', params: { shell: 'powershell', cmd: `Start-Process ${quoted}` } };
 }
 
-function buildVar(): Record<string, any> {
-  const f = form.value;
-  if (isWeb.value || isFolder.value) {
+function buildVar(f: ExtFormState = form.value, type: ExtType = extType.value): Record<string, any> {
+  if (type === 'web' || type === 'folder') {
     return buildOpenVar(f);
   }
-  if (isShell.value) {
+  if (type === 'shell') {
     const params: Record<string, any> = { cmd: f.cmd, trim: f.trim };
     if (f.shellChoice && f.shellChoice !== 'default') params.shell = f.shellChoice;
     return { name: f.varName, type: 'shell', params };
@@ -884,13 +1056,12 @@ function buildVar(): Record<string, any> {
   return { name: f.varName, type: 'script', params: { args } };
 }
 
-function validate(): string | null {
-  const f = form.value;
-  if (!triggerLines.value.length) return t('extensions.form.required', { field: t('extensions.form.trigger') });
-  if (isWeb.value && !f.target.trim()) return t('extensions.form.required', { field: t('extensions.form.url') });
-  if (isFolder.value && !f.target.trim()) return t('extensions.form.required', { field: t('extensions.form.folderPath') });
-  if (isShell.value && !f.cmd.trim()) return t('extensions.form.required', { field: t('extensions.form.cmd') });
-  if (isScript.value) {
+function validate(f: ExtFormState = form.value, type: ExtType = extType.value): string | null {
+  if (!f.trigger.split('\n').some((s) => s.trim())) return t('extensions.form.required', { field: t('extensions.form.trigger') });
+  if (type === 'web' && !f.target.trim()) return t('extensions.form.required', { field: t('extensions.form.url') });
+  if (type === 'folder' && !f.target.trim()) return t('extensions.form.required', { field: t('extensions.form.folderPath') });
+  if (type === 'shell' && !f.cmd.trim()) return t('extensions.form.required', { field: t('extensions.form.cmd') });
+  if (type === 'script') {
     if (!f.program.trim()) return t('extensions.form.required', { field: t('extensions.form.program') });
     if (f.mode === 'file' && !f.scriptPath.trim()) return t('extensions.form.required', { field: t('extensions.form.scriptPath') });
     if (f.mode === 'inline' && !f.inlineCode.trim()) return t('extensions.form.required', { field: t('extensions.form.inlineCode') });
@@ -898,63 +1069,67 @@ function validate(): string | null {
   return null;
 }
 
-async function onSave() {
-  const err = validate();
-  if (err) {
-    toast.error(err);
-    return;
+async function saveCurrent(showToast: boolean, notifyInvalid = false): Promise<boolean> {
+  clearAutoSaveTimer();
+  if (savePromise) await savePromise;
+  const itemId = editingId.value;
+  if (!itemId && !isCreating.value) return true;
+  if (isCreating.value && !showToast && !form.value.trigger.trim() && !form.value.label.trim()
+    && !form.value.target.trim() && !form.value.cmd.trim()
+    && !form.value.scriptPath.trim() && !form.value.inlineCode.trim()) return true;
+  const snapshot = JSON.stringify(form.value);
+  if (!isCreating.value && snapshot === savedForm) return true;
+  const data: ExtFormState = JSON.parse(snapshot);
+  const type = extType.value;
+  const error = validate(data, type);
+  if (error || !/^[A-Za-z0-9_]+$/.test(data.varName)) {
+    // 不完整的草稿不写盘；显式保存或切换时告知原因。
+    if (showToast || notifyInvalid) toast.error(error || t('extensions.form.varNameInvalid'));
+    return false;
   }
-  const lines = triggerLines.value;
-  const first = lines[0] ?? '';
-  try {
-    if (!isCreating.value && editingItem.value) {
-      await store.updateMatch(editingItem.value.id, {
-        trigger: first,
-        triggers: lines,
-        label: form.value.label.trim() || undefined,
-        replace: form.value.replace,
-        vars: [buildVar()],
-      } as any);
-      toast.success(`${first} ✓`);
-      form.value = formFromMatch(editingItem.value.match);
-    } else {
-      const target = matchFiles.value.find((f) => f.id === form.value.targetFileId);
-      const created = await store.addItem(
-        {
-          trigger: first,
-          triggers: lines,
-          label: form.value.label.trim() || undefined,
-          description: '',
-          replace: form.value.replace,
-          contentType: 'plain',
-          word: false,
-          propagateCase: false,
-          uppercaseStyle: '',
-          forceMode: '',
-          apps: [],
-          exclude_apps: [],
-          search_terms: [],
-          priority: 0,
-          hotkey: '',
-          image_path: '',
-          vars: [buildVar()],
-        } as any,
-        'match',
-        target?.id ?? null,
-        -1,
-        isShell.value ? '新建命令行扩展' : '新建脚本扩展',
-      );
-      if (created) {
-        toast.success(`${form.value.trigger.trim()} ✓`);
+  const lines = data.trigger.split('\n').map((s) => s.trim()).filter(Boolean);
+  savePromise = (async () => {
+    try {
+      if (isCreating.value) {
+        const target = matchFiles.value.find((f) => f.id === data.targetFileId);
+        const created = await store.addItem({
+          trigger: lines[0], triggers: lines, label: data.label.trim() || undefined,
+          description: '', replace: data.replace, contentType: 'plain', word: false,
+          propagateCase: false, uppercaseStyle: '', forceMode: '', apps: [], exclude_apps: [],
+          search_terms: [], priority: 0, hotkey: '', image_path: '',
+          vars: [buildVar(data, type)],
+        } as any, 'match', target?.id ?? null, -1, `新建${extTypeLabel.value}`);
+        if (!created) {
+          toast.error(store.state.error || t('common.error'));
+          return false;
+        }
+        editingId.value = created.id;
         isCreating.value = false;
         hasEditedAnyField.value = false;
-        editingId.value = created.id;
-        form.value = formFromMatch(created);
+      } else if (itemId) {
+        await store.updateMatch(itemId, {
+          trigger: lines[0], triggers: lines, label: data.label.trim() || undefined,
+          replace: data.replace, vars: [buildVar(data, type)],
+        } as any);
       }
+      savedForm = snapshot;
+      if (showToast) toast.success(`${lines[0]} ✓`);
+      return true;
+    } catch (e: any) {
+      toast.error(e?.message || String(e));
+      return false;
     }
-  } catch (e: any) {
-    toast.error(e?.message || String(e));
+  })();
+  const success = await savePromise;
+  savePromise = null;
+  if (success && JSON.stringify(form.value) !== savedForm && userPreferences.preferences.autoSave) {
+    autoSaveTimer = setTimeout(() => { void saveCurrent(false); }, 600);
   }
+  return success;
+}
+
+async function onSave() {
+  await saveCurrent(true);
 }
 
 function onDeleteClick() {
@@ -972,6 +1147,8 @@ function onDeleteClick() {
 async function removeSelected() {
   const item = editingItem.value;
   if (!item) return;
+  clearAutoSaveTimer();
+  if (savePromise) await savePromise;
   try {
     await store.deleteItem(item.id, 'match');
     toast.success(`${item.trigger} ✓`);

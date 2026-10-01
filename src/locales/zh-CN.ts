@@ -113,7 +113,6 @@ export default {
       "trigger": "触发词",
       "triggerPlaceholder": "例如: :ip",
       "triggerHint": "输入该触发词后，espanso 会将其替换为命令/脚本的输出",
-      "triggerMultiPlaceholder": "例如:\n:yt\n:youtube",
       "triggerMultiHint": "支持多个触发词：每行填写一个，输入任意一个都会生效",
       "label": "名称（可选）",
       "labelPlaceholder": "例如: 查询公网 IP",
@@ -136,6 +135,9 @@ export default {
       "modeInline": "内联代码",
       "program": "解释程序",
       "programPlaceholder": "python",
+      "programMenuLabel": "常用解释程序",
+      "programNoMatch": "没有匹配的常用解释程序，可直接输入",
+      "scriptFiles": "脚本文件",
       "scriptPath": "脚本路径",
       "scriptPathPlaceholder": "%CONFIG%/scripts/script.py",
       "scriptPathHint": "%CONFIG% 会自动替换为 espanso 配置目录；推荐把脚本放在配置目录的 scripts 文件夹下",
@@ -632,5 +634,35 @@ export default {
     "never": "从未",
     "snippets": "个片段",
     "files": "个文件"
+  },
+  "commandPalette": {
+    "placeholder": "搜索命令、片段或文件…",
+    "empty": "没有匹配的结果",
+    "moreTriggers": "另有 {n} 个触发词",
+    "groups": {
+      "command": "命令",
+      "match": "片段",
+      "file": "配置文件"
+    },
+    "cmd": {
+      "snippets": "片段管理",
+      "snippetsHint": "打开片段编辑器",
+      "apps": "应用配置管理器",
+      "appsHint": "管理 config/*.yml 应用规则",
+      "settings": "设置",
+      "settingsHint": "打开 Easy Espanso 设置",
+      "undo": "撤销",
+      "undoEmpty": "没有可撤销操作",
+      "redo": "重做",
+      "redoEmpty": "没有可重做操作",
+      "open": "在文件管理器中打开配置目录",
+      "openEmpty": "未选择工作区",
+      "restart": "重启 Espanso",
+      "restartHint": "重新加载配置并重启服务",
+      "expand": "展开全部配置",
+      "expandHint": "展开左侧配置树",
+      "collapse": "折叠全部配置",
+      "collapseHint": "折叠左侧配置树"
+    }
   }
 }
