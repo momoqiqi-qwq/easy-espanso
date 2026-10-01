@@ -24,6 +24,10 @@ serde_yaml = "0.9"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp", "Win32_Graphics_Gdi"] }
 
+[features]
+# 发布构建通过 tauri CLI 自动启用；缺失会导致前端资源不嵌入 exe（运行时白屏）
+custom-protocol = ["tauri/custom-protocol"]
+
 [profile.release]
 opt-level = "s"      # 优先体积
 lto = true
