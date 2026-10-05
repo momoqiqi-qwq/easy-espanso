@@ -225,6 +225,7 @@
 
           <!-- 界面偏好（仅影响 Easy Espanso，不写入 Espanso 配置） -->
           <div v-if="activeCategory === 'interface'" class="grid grid-cols-2 gap-4">
+            <ExtensionPreferencesPanel />
             <div class="form-item">
               <Label for="interface_density">{{ t('settings.interfaceSettings.density') }}</Label>
               <Select v-model="interfaceDensity">
@@ -1241,6 +1242,7 @@ import {
 } from "@/components/ui/tooltip";
 import { Separator } from "../components/ui/separator";
 import EspansoToolsPanel from '@/components/settings/EspansoToolsPanel.vue';
+import ExtensionPreferencesPanel from '@/components/settings/ExtensionPreferencesPanel.vue';
 import AppUpdatePanel from '@/components/settings/AppUpdatePanel.vue';
 import type { AccentColor, FontScale, ScrollbarSize, ToastDuration, ToastPosition, HistoryLimit } from '@/store/useUserPreferences';
 import * as workspaceService from '@/services/workspaceService';

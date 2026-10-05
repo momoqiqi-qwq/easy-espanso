@@ -48,6 +48,7 @@
     </template>
 
     <Toaster :position="toastPosition" richColors :duration="toastDuration" />
+    <UpdateAvailableDialog v-model:open="updateDialogOpen" />
   </div>
 </template>
 
@@ -57,7 +58,7 @@ import { useI18n } from 'vue-i18n';
 import { useEspansoStore } from './store/useEspansoStore'; // 引入重构后的 Store
 import { useUserPreferences } from './store/useUserPreferences';
 import { useUpdateStore } from './store/useUpdateStore';
-import { RELEASES_URL, openReleaseUrl } from './services/updateService';
+import UpdateAvailableDialog from './components/settings/UpdateAvailableDialog.vue';
 import AppLayout from './components/layouts/AppLayout.vue'; // 导入路由布局组件
 import { FolderIcon } from 'lucide-vue-next';
 import { Toaster, toast } from 'vue-sonner';
@@ -114,19 +115,14 @@ const needsConfigSelection = computed(() => {
 });
 
 // --- 初始化逻辑 ---
+/** 发现新版本时的启动提醒弹窗 */
+const updateDialogOpen = ref(false);
 onMounted(async () => {
+  // 启动时后台检查 GitHub Releases；有新版本且未被「不再提醒」忽略时弹提醒
   if (userPreferences.preferences.checkUpdatesOnStartup) {
     const updates = useUpdateStore();
     void updates.check().then(() => {
-      if (updates.available && !updates.error) {
-        toast.info(t('updates.available', { version: updates.release?.tag_name }), {
-          duration: 10000,
-          action: {
-            label: t('updates.releases'),
-            onClick: () => { void openReleaseUrl(RELEASES_URL).catch(error => toast.error(String(error))); },
-          },
-        });
-      }
+      if (updates.shouldPrompt) updateDialogOpen.value = true;
     });
   }
   // 高级用户可以关闭启动阻塞检测，直接进入配置编辑。

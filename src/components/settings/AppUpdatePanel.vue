@@ -14,6 +14,10 @@
         @change="preferences.updatePreference('checkUpdatesOnStartup', ($event.target as HTMLInputElement).checked)" />
       {{ t('updates.automatic') }}
     </label>
+    <p v-if="updates.skippedVersion" class="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+      <span>{{ t('updates.skippedNotice', { version: updates.skippedVersion }) }}</span>
+      <Button variant="outline" size="sm" @click="updates.resumeReminders()">{{ t('updates.resume') }}</Button>
+    </p>
     <p v-if="updates.error" class="text-sm text-destructive">{{ t('updates.failed') }}: {{ updates.error }}</p>
     <template v-else-if="updates.checked">
       <p class="text-sm">{{ updates.available ? t('updates.available', { version: updates.release?.tag_name }) : t(updates.release ? 'updates.latest' : 'updates.noRelease') }}</p>
@@ -21,6 +25,9 @@
     <template v-if="updates.release && updates.available">
       <pre v-if="updates.release.body" class="text-sm whitespace-pre-wrap max-h-40 overflow-auto font-sans">{{ updates.release.body }}</pre>
       <div class="flex flex-wrap gap-2">
+        <Button v-if="updates.installer" :disabled="busy" @click="updateNow">
+          {{ t(updates.downloading ? 'updates.downloading' : updates.installing ? 'updates.installing' : 'updates.updateNow') }}
+        </Button>
         <Button v-for="asset in assets" :key="asset.browser_download_url" variant="outline" @click="open(asset.browser_download_url)">
           {{ t('updates.download') }} {{ asset.name }} ({{ (asset.size / 1048576).toFixed(1) }} MB)
         </Button>
@@ -44,8 +51,17 @@ const { t } = useI18n();
 const updates = useUpdateStore();
 const preferences = useUserPreferences();
 const assets = computed(() => updates.release ? downloadableAssets(updates.release) : []);
+const busy = computed(() => updates.downloading || updates.installing);
 async function open(url: string) {
   try { await openReleaseUrl(url); }
   catch (error) { toast.error(t('updates.failed'), { description: String(error) }); }
+}
+async function updateNow() {
+  try {
+    await updates.updateNow();
+    toast.info(t('updates.updated'));
+  } catch (error) {
+    toast.error(t('updates.failed'), { description: String(error) });
+  }
 }
 </script>

@@ -31,6 +31,8 @@ export interface UserPreferences {
   showSidebarLabels: boolean;
   checkEspansoOnStartup: boolean;
   checkUpdatesOnStartup: boolean;
+  /** 被「不再提醒」忽略的版本号；空串表示不忽略任何版本。 */
+  skippedUpdateVersion: string;
   toastPosition: ToastPosition;
   toastDuration: ToastDuration;
   autoSave: boolean;
@@ -43,6 +45,13 @@ export interface UserPreferences {
   middlePaneWidth: MiddlePaneWidth;
   treeIndentSize: TreeIndentSize;
   sidebarOrder: SidebarRouteId[];
+  extensionShowIcons: boolean;
+  extensionShowLabels: boolean;
+  extensionShowFileNames: boolean;
+  extensionShowPreview: boolean;
+  extensionSort: 'source' | 'trigger' | 'label';
+  extensionRowHeight: number;
+  extensionAutoSaveDelay: number;
 }
 
 const DEFAULT_PREFERENCES: UserPreferences = {
@@ -60,6 +69,7 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   showSidebarLabels: true,
   checkEspansoOnStartup: true,
   checkUpdatesOnStartup: true,
+  skippedUpdateVersion: '',
   toastPosition: 'top-center',
   toastDuration: 2500,
   autoSave: true,
@@ -72,12 +82,26 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   middlePaneWidth: 350,
   treeIndentSize: 20,
   sidebarOrder: ['snippets', 'shell', 'scripts', 'web', 'folders', 'apps', 'settings'],
+  extensionShowIcons: true,
+  extensionShowLabels: true,
+  extensionShowFileNames: true,
+  extensionShowPreview: false,
+  extensionSort: 'source',
+  extensionRowHeight: 34,
+  extensionAutoSaveDelay: 600,
 };
 
 export const useUserPreferences = defineStore('userPreferences', () => {
   const sanitizePreferences = (input: Partial<UserPreferences>): UserPreferences => {
     const merged = { ...DEFAULT_PREFERENCES, ...input } as UserPreferences;
+    for (const key of ['extensionShowIcons', 'extensionShowLabels', 'extensionShowFileNames', 'extensionShowPreview'] as const) {
+      if (typeof merged[key] !== 'boolean') merged[key] = DEFAULT_PREFERENCES[key];
+    }
+    if (!['source', 'trigger', 'label'].includes(merged.extensionSort)) merged.extensionSort = 'source';
+    if (![28, 34, 42].includes(merged.extensionRowHeight)) merged.extensionRowHeight = 34;
+    if (![300, 600, 1200, 2000].includes(merged.extensionAutoSaveDelay)) merged.extensionAutoSaveDelay = 600;
     if (typeof merged.checkUpdatesOnStartup !== 'boolean') merged.checkUpdatesOnStartup = true;
+    if (typeof merged.skippedUpdateVersion !== 'string') merged.skippedUpdateVersion = '';
     if (![90, 100, 110, 125, 150].includes(merged.fontScale)) merged.fontScale = DEFAULT_PREFERENCES.fontScale;
     if (!['blue', 'violet', 'cyan', 'emerald', 'amber', 'rose'].includes(merged.accentColor)) merged.accentColor = DEFAULT_PREFERENCES.accentColor;
     if (!['slim', 'standard', 'wide'].includes(merged.scrollbarSize)) merged.scrollbarSize = DEFAULT_PREFERENCES.scrollbarSize;
@@ -174,6 +198,7 @@ export const useUserPreferences = defineStore('userPreferences', () => {
       hideUnsavedChangesWarning: DEFAULT_PREFERENCES.hideUnsavedChangesWarning,
       checkEspansoOnStartup: DEFAULT_PREFERENCES.checkEspansoOnStartup,
       checkUpdatesOnStartup: DEFAULT_PREFERENCES.checkUpdatesOnStartup,
+      skippedUpdateVersion: DEFAULT_PREFERENCES.skippedUpdateVersion,
       toastPosition: DEFAULT_PREFERENCES.toastPosition,
       toastDuration: DEFAULT_PREFERENCES.toastDuration,
       autoSave: DEFAULT_PREFERENCES.autoSave,
@@ -186,6 +211,13 @@ export const useUserPreferences = defineStore('userPreferences', () => {
       middlePaneWidth: DEFAULT_PREFERENCES.middlePaneWidth,
       treeIndentSize: DEFAULT_PREFERENCES.treeIndentSize,
       sidebarOrder: [...DEFAULT_PREFERENCES.sidebarOrder],
+      extensionShowIcons: DEFAULT_PREFERENCES.extensionShowIcons,
+      extensionShowLabels: DEFAULT_PREFERENCES.extensionShowLabels,
+      extensionShowFileNames: DEFAULT_PREFERENCES.extensionShowFileNames,
+      extensionShowPreview: DEFAULT_PREFERENCES.extensionShowPreview,
+      extensionSort: DEFAULT_PREFERENCES.extensionSort,
+      extensionRowHeight: DEFAULT_PREFERENCES.extensionRowHeight,
+      extensionAutoSaveDelay: DEFAULT_PREFERENCES.extensionAutoSaveDelay,
     };
     savePreferences();
     applyPreferencesToDocument();

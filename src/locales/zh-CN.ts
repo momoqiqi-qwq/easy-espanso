@@ -1,10 +1,25 @@
 export default {
+  extensionMenu: { edit: '编辑', copy: '复制片段', cut: '剪切片段', paste: '粘贴到此文件', path: '复制配置文件路径', confirm: '确定删除“{trigger}”？' },
+  extensionPreferences: {
+    title: '命令行、脚本、网页与文件夹', hint: '修改后立即生效并保存；支持偏好导入、导出与重置。自动保存延迟仅影响这四类扩展。',
+    extensionShowIcons: '显示类型图标', extensionShowLabels: '显示标签', extensionShowFileNames: '无标签时显示配置文件名', extensionShowPreview: '显示第二行内容预览',
+    sort: '列表排序', source: '配置原始顺序', trigger: '按触发词', label: '按标签', rowHeight: '列表最小行高', delay: '自动保存延迟',
+  },
   updates: {
     title: '应用更新', current: '当前版本：{version}', check: '检查更新', checking: '正在检查…',
     automatic: '启动时自动检查 GitHub Releases', failed: '更新检查或下载失败',
     available: '发现新版本 {version}', latest: '当前已是最新版本', noRelease: '暂无正式发布版本，或更新仓库不可访问',
     download: '下载', releases: '查看 GitHub Releases', downloadHint: '点击后通过系统浏览器下载安装包，下载完成后手动安装。',
     noAssets: '该版本暂无安装包，请前往发布页面查看。',
+    dialogTitle: '发现新版本 {version}',
+    dialogBody: '当前版本 {current}，最新版本 {version}。可以立即自动更新，或稍后自行处理。',
+    updateNow: '自动更新', skipVersion: '不再提醒',
+    downloading: '正在下载安装包…', installing: '正在启动安装程序…',
+    updated: '安装程序已启动，应用将退出以完成更新。',
+    skipped: '已不再提醒版本 {version}，出现更高版本时仍会提醒。',
+    skipHint: '「不再提醒」只忽略这个版本，出现更高版本时仍会提醒。',
+    skippedNotice: '已忽略版本 {version} 的提醒。', resume: '恢复提醒',
+    noInstaller: '该版本暂无 Windows 安装包，请前往发布页手动下载。',
   },
   "greeting": "你好！",
   "installation": {

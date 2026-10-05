@@ -1,6 +1,6 @@
 [package]
 name = "easy-espanso"
-version = "1.3.0"
+version = "1.4.0"
 description = "Easy Espanso configuration editor"
 authors = ["Easy Espanso Team"]
 edition = "2021"

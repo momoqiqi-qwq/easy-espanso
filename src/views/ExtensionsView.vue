@@ -35,24 +35,31 @@
 
         <!-- 紧凑单行列表：图标、触发词、标签 -->
         <template v-else>
-          <button v-for="item in listItems" :key="item.id" type="button"
+          <ExtensionContextMenu v-for="item in listItems" :key="item.id" @action="handleMenuAction(item, $event)">
+          <button type="button"
             class="ext-list-row w-full flex items-center gap-1.5 px-3 py-1.5 text-left transition-colors"
+            :style="{ minHeight: `${userPreferences.preferences.extensionRowHeight}px` }"
             :class="item.id === editingId && !isCreating
               ? 'bg-[linear-gradient(135deg,#2b5876,#4e4376)] text-white'
               : 'bg-card text-foreground hover:bg-accent hover:text-accent-foreground'"
             :aria-pressed="item.id === editingId && !isCreating"
             :title="[item.trigger, item.label, previewOf(item.match), item.fileBase].filter(Boolean).join('\n')"
             @click="selectItem(item)">
-            <component :is="typeIcon" class="h-4 w-4 shrink-0"
+            <component v-if="userPreferences.preferences.extensionShowIcons" :is="typeIcon" class="h-4 w-4 shrink-0"
               :class="item.id === editingId && !isCreating ? 'text-white' : 'text-primary'" />
-            <span class="flex-1 min-w-0 truncate text-sm">{{ item.trigger }}</span>
+            <span class="flex-1 min-w-0">
+              <span class="block truncate text-sm">{{ item.trigger }}</span>
+              <span v-if="userPreferences.preferences.extensionShowPreview" class="block truncate text-xs opacity-70">{{ previewOf(item.match) }}</span>
+            </span>
             <span v-if="item.extraTriggers > 0" class="shrink-0 text-xs opacity-80">+{{ item.extraTriggers }}</span>
-            <span class="min-w-0 max-w-[40%] shrink-0 truncate text-xs px-1.5 rounded"
+            <span v-if="userPreferences.preferences.extensionShowLabels && item.label" class="min-w-0 max-w-[40%] shrink-0 truncate text-xs px-1.5 rounded"
               :class="item.id === editingId && !isCreating ? 'bg-white/15 text-white' : 'bg-accent/50 text-muted-foreground'"
               :title="item.label || item.fileBase">
-              {{ item.label || item.fileBase }}
+              {{ item.label }}
             </span>
+            <span v-if="userPreferences.preferences.extensionShowFileNames && (!item.label || !userPreferences.preferences.extensionShowLabels)" class="max-w-[40%] shrink-0 truncate text-xs opacity-70" :title="item.filePath">{{ item.fileBase }}</span>
           </button>
+          </ExtensionContextMenu>
         </template>
       </div>
     </aside>
@@ -395,6 +402,8 @@ import {
 } from 'lucide-vue-next';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import * as platformService from '@/services/platformService';
+import ExtensionContextMenu, { type ExtensionMenuAction } from '@/components/ExtensionContextMenu.vue';
+import { useContextMenu } from '@/hooks/useContextMenu';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Textarea } from '../components/ui/textarea';
@@ -598,6 +607,9 @@ const listItems = computed<ListItem[]>(() =>
         fileBase: (m.filePath || '').split(/[\\/]/).pop() || '',
         match: m,
       };
+    }).sort((a, b) => {
+      const sort = userPreferences.preferences.extensionSort;
+      return sort === 'source' ? 0 : (sort === 'trigger' ? a.trigger.localeCompare(b.trigger) : a.label.localeCompare(b.label));
     }),
 );
 
@@ -767,7 +779,7 @@ watch(form, () => {
   if ((!isCreating.value && !editingId.value) || !userPreferences.preferences.autoSave) return;
   clearAutoSaveTimer();
   if (JSON.stringify(form.value) !== savedForm && !validate() && !varNameError.value) {
-    autoSaveTimer = setTimeout(() => { void saveCurrent(false); }, 600);
+    autoSaveTimer = setTimeout(() => { void saveCurrent(false); }, userPreferences.preferences.extensionAutoSaveDelay);
   }
 }, { deep: true });
 
@@ -794,6 +806,50 @@ async function selectItem(item: ListItem) {
   editingId.value = item.id;
   setForm(formFromMatch(item.match));
 }
+
+const menuTarget = ref<ListItem | null>(null);
+const menuActions = useContextMenu({ getNode: () => {
+  const item = menuTarget.value;
+  if (!item) return null;
+  const match = store.allMatches.find(m => m.id === item.id) || item.match;
+  return { id: item.id, type: 'match', name: item.trigger, children: [], match };
+} });
+
+async function handleMenuAction(item: ListItem, action: ExtensionMenuAction) {
+  // Flush the editor before clipboard or destructive operations; invalid edits keep the current selection.
+  if (!await saveCurrent(false, true)) return;
+  menuTarget.value = item;
+  try {
+    if (action === 'new') { await startCreate(); return; }
+    if (action === 'edit') { await selectItem(item); return; }
+    if (action === 'copy') { menuActions.handleCopyItem(); return; }
+    if (action === 'cut') { menuActions.handleCutItem(); return; }
+    if (action === 'path') { await menuActions.handleCopyNodePath(); return; }
+    if (action === 'paste') {
+      await menuActions.handlePasteItem();
+      const selected = listItems.value.find(m => m.id === editingId.value);
+      if (selected) setForm(formFromMatch(selected.match));
+      else if (editingId.value) await cancelEdit();
+      return;
+    }
+    if (action === 'delete') {
+      await selectItem(item);
+      if (editingId.value !== item.id) return;
+      if (userPreferences.preferences.confirmBeforeDelete) {
+        const result = await platformService.showMessageBox({ type: 'question', title: t('extensions.form.delete'), message: t('extensionMenu.confirm', { trigger: item.trigger }), buttons: [t('common.cancel'), t('extensions.form.delete')], defaultId: 0, cancelId: 0 });
+        if (result.response !== 1) return;
+      }
+      await removeSelected();
+    }
+  } catch (error) { toast.error(String(error)); }
+}
+
+watch(() => userPreferences.preferences.autoSave, enabled => {
+  clearAutoSaveTimer();
+  if (enabled && JSON.stringify(form.value) !== savedForm && !validate()) {
+    autoSaveTimer = setTimeout(() => { void saveCurrent(false); }, userPreferences.preferences.extensionAutoSaveDelay);
+  }
+});
 
 async function startCreate() {
   if (!await saveCurrent(false, true)) return;
@@ -1101,7 +1157,7 @@ async function saveCurrent(showToast: boolean, notifyInvalid = false): Promise<b
   const success = await savePromise;
   savePromise = null;
   if (success && JSON.stringify(form.value) !== savedForm && userPreferences.preferences.autoSave) {
-    autoSaveTimer = setTimeout(() => { void saveCurrent(false); }, 600);
+    autoSaveTimer = setTimeout(() => { void saveCurrent(false); }, userPreferences.preferences.extensionAutoSaveDelay);
   }
   return success;
 }
@@ -1111,6 +1167,7 @@ async function onSave() {
 }
 
 function onDeleteClick() {
+  if (!userPreferences.preferences.confirmBeforeDelete) { void removeSelected(); return; }
   if (!confirmingDelete.value) {
     confirmingDelete.value = true;
     if (deleteConfirmTimer) clearTimeout(deleteConfirmTimer);

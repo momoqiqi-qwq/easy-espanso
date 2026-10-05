@@ -64,6 +64,38 @@ export function downloadableAssets(release: Release): ReleaseAsset[] {
   return release.assets.filter(asset => /\.(exe|msi|dmg|appimage|deb|rpm|zip|tar\.gz)$/i.test(asset.name));
 }
 
+/** Windows 优先取 NSIS 安装包（*setup.exe），其次任意 exe，最后 msi。 */
+export function pickInstallerAsset(release: Release): ReleaseAsset | null {
+  const exe = release.assets.filter(asset => /\.exe$/i.test(asset.name));
+  return exe.find(asset => /setup/i.test(asset.name)) ?? exe[0]
+    ?? release.assets.find(asset => /\.msi$/i.test(asset.name)) ?? null;
+}
+
+export function normalizeVersion(value: string): string {
+  return value.trim().replace(/^v/i, '');
+}
+
+/** 「不再提醒」按版本记录：只忽略被点掉的那个版本，出现更高版本仍会提醒。 */
+export function isVersionSkipped(latest: string, skipped: string | undefined | null): boolean {
+  if (!skipped || !latest) return false;
+  return normalizeVersion(latest) === normalizeVersion(skipped);
+}
+
+/** 走 Rust 原生下载到临时目录，返回本地路径；Web 预览下退回浏览器下载。 */
+export async function downloadUpdateAsset(asset: ReleaseAsset): Promise<string> {
+  if (!isTauri()) {
+    await openReleaseUrl(asset.browser_download_url);
+    return '';
+  }
+  return invoke<string>('download_update_asset', { url: asset.browser_download_url, fileName: asset.name });
+}
+
+/** 启动安装程序并退出应用；Web 预览下退回打开下载页。 */
+export async function installUpdate(path: string): Promise<void> {
+  if (!isTauri() || !path) return;
+  await invoke('install_update_and_restart', { path });
+}
+
 export async function openReleaseUrl(url: string): Promise<void> {
   const parsed = new URL(url);
   if (parsed.protocol !== 'https:' || parsed.hostname !== 'github.com' || !parsed.pathname.startsWith('/momoqiqi-qwq/easy-espanso/releases')) {

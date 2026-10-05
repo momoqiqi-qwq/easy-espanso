@@ -1,10 +1,25 @@
 export default {
+  extensionMenu: { edit: 'Edit', copy: 'Copy snippet', cut: 'Cut snippet', paste: 'Paste into this file', path: 'Copy configuration path', confirm: 'Delete "{trigger}"?' },
+  extensionPreferences: {
+    title: 'Commands, scripts, websites and folders', hint: 'Changes apply immediately and support preference import, export and reset. The save delay applies to these four extension views.',
+    extensionShowIcons: 'Show type icons', extensionShowLabels: 'Show labels', extensionShowFileNames: 'Show file name when no label is displayed', extensionShowPreview: 'Show content preview on a second line',
+    sort: 'List sorting', source: 'Configuration order', trigger: 'By trigger', label: 'By label', rowHeight: 'Minimum row height', delay: 'Auto-save delay',
+  },
   updates: {
     title: 'Application updates', current: 'Current version: {version}', check: 'Check for updates', checking: 'Checking…',
     automatic: 'Check GitHub Releases on startup', failed: 'Update check or download failed',
     available: 'New version {version} available', latest: 'You are up to date', noRelease: 'No stable release available, or the repository is inaccessible',
     download: 'Download', releases: 'View GitHub Releases', downloadHint: 'Downloads open in your system browser. Install the package manually after downloading.',
     noAssets: 'No installation packages available. See the release page for details.',
+    dialogTitle: 'New version {version} available',
+    dialogBody: 'You are on {current}; the latest release is {version}. Update automatically now or handle it later.',
+    updateNow: 'Update now', skipVersion: 'Do not remind me',
+    downloading: 'Downloading the installer…', installing: 'Starting the installer…',
+    updated: 'The installer has started; the app will exit to finish updating.',
+    skipped: 'Version {version} will not be announced again. A newer version will still be announced.',
+    skipHint: '"Do not remind me" only skips this version; a newer version will be announced again.',
+    skippedNotice: 'Version {version} is currently ignored.', resume: 'Resume reminders',
+    noInstaller: 'This release has no Windows installer. Download it from the release page instead.',
   },
   "greeting": "Hello!",
   "installation": {

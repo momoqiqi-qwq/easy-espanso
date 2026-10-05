@@ -846,8 +846,7 @@ fn get_executable_under_cursor() -> Result<String, String> {
 }
 
 /// Fixed public release endpoint; native HTTP avoids WebView CORS restrictions.
-#[tauri::command]
-async fn get_latest_release() -> Result<Option<Value>, String> {
+async fn fetch_latest_release() -> Result<Option<Value>, String> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(20))
         .user_agent(concat!("easy-espanso/", env!("CARGO_PKG_VERSION")))
@@ -864,6 +863,81 @@ async fn get_latest_release() -> Result<Option<Value>, String> {
     response.json::<Value>().await.map(Some).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+async fn get_latest_release() -> Result<Option<Value>, String> {
+    fetch_latest_release().await
+}
+
+/// Only release assets of this repository may be downloaded; the host allow-list keeps a
+/// tampered release payload from turning the updater into a generic downloader.
+const UPDATE_ASSET_PREFIX: &str = "https://github.com/momoqiqi-qwq/easy-espanso/releases/download/";
+
+fn update_dir() -> PathBuf {
+    env::temp_dir().join("easy-espanso-updates")
+}
+
+/// Download a release asset into the update directory and return its absolute path.
+async fn download_update_asset_impl(url: &str, file_name: &str) -> Result<PathBuf, String> {
+    if !url.starts_with(UPDATE_ASSET_PREFIX) {
+        return Err("更新地址不在受信任的发布范围内".into());
+    }
+    let safe_name = Path::new(file_name)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "更新包文件名无效".to_string())?;
+    if !safe_name.to_ascii_lowercase().ends_with(".exe") {
+        return Err("更新包格式不受支持，请前往发布页手动下载".into());
+    }
+    let dir = update_dir();
+    fs::create_dir_all(&dir).map_err(|e| format!("创建更新目录失败: {e}"))?;
+    let target = dir.join(safe_name);
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(600))
+        .user_agent(concat!("easy-espanso/", env!("CARGO_PKG_VERSION")))
+        .build().map_err(|e| e.to_string())?;
+    let response = client.get(url).send().await.map_err(|e| format!("下载更新包失败: {e}"))?;
+    let response = response.error_for_status().map_err(|e| format!("下载更新包失败: {e}"))?;
+    let bytes = response.bytes().await.map_err(|e| format!("读取更新包失败: {e}"))?;
+    if bytes.is_empty() {
+        return Err("下载到的更新包为空".into());
+    }
+    fs::write(&target, &bytes).map_err(|e| format!("写入更新包失败: {e}"))?;
+    Ok(target)
+}
+
+#[tauri::command]
+async fn download_update_asset(url: String, file_name: String) -> Result<String, String> {
+    download_update_asset_impl(&url, &file_name)
+        .await
+        .map(|path| path.to_string_lossy().into_owned())
+}
+
+/// Guard the installer path so only a package we downloaded into the update directory can run.
+fn resolve_update_package(path: &str) -> Result<PathBuf, String> {
+    let target = fs::canonicalize(path).map_err(|_| "更新包不存在，请重新下载".to_string())?;
+    let dir = fs::canonicalize(update_dir()).map_err(|_| "更新目录不存在，请重新下载".to_string())?;
+    if !target.starts_with(&dir) {
+        return Err("更新包路径无效".into());
+    }
+    let is_exe = target.extension().and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("exe")).unwrap_or(false);
+    if !is_exe {
+        return Err("更新包格式不受支持".into());
+    }
+    Ok(target)
+}
+
+/// Launch the downloaded installer, then quit so the installer can replace the running files.
+#[tauri::command]
+fn install_update_and_restart(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let target = resolve_update_package(&path)?;
+    Command::new(&target)
+        .spawn()
+        .map_err(|e| format!("启动安装程序失败: {e}"))?;
+    app.exit(0);
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -876,8 +950,63 @@ pub fn run() {
             rename_file_or_directory, join_path, get_platform, get_environment_variable,
             parse_yaml, serialize_yaml, get_espanso_status, control_espanso, open_in_explorer,
             get_executable_under_cursor, export_espanso_backup, import_espanso_backup,
-            get_app_icon_base64, get_latest_release
+            get_app_icon_base64, get_latest_release, download_update_asset, install_update_and_restart
         ])
         .run(tauri::generate_context!())
         .expect("error while running Easy Espanso");
+}
+
+#[cfg(test)]
+mod update_tests {
+    use super::*;
+
+    /// Latest published release must expose a Windows installer we can download.
+    #[test]
+    fn latest_release_exposes_windows_installer() {
+        let release = tauri::async_runtime::block_on(fetch_latest_release())
+            .expect("GitHub API unreachable")
+            .expect("no published release found");
+        let assets = release["assets"].as_array().expect("assets array");
+        let installer = assets.iter().find(|asset| {
+            asset["name"].as_str().map(|name| name.to_ascii_lowercase().ends_with("setup.exe")).unwrap_or(false)
+        });
+        let installer = installer.expect("release has no *setup.exe asset");
+        let url = installer["browser_download_url"].as_str().expect("download url");
+        assert!(url.starts_with(UPDATE_ASSET_PREFIX), "unexpected asset url: {url}");
+        let size = installer["size"].as_u64().expect("asset size");
+        assert!(size > 0, "asset size should be positive");
+    }
+
+    /// End-to-end native download: API -> asset pick -> bytes on disk with matching size.
+    #[test]
+    fn downloads_published_installer_with_matching_size() {
+        let release = tauri::async_runtime::block_on(fetch_latest_release())
+            .expect("GitHub API unreachable")
+            .expect("no published release found");
+        let assets = release["assets"].as_array().expect("assets array").clone();
+        let installer = assets.iter()
+            .find(|asset| asset["name"].as_str().map(|n| n.to_ascii_lowercase().ends_with("setup.exe")).unwrap_or(false))
+            .expect("release has no *setup.exe asset");
+        let url = installer["browser_download_url"].as_str().unwrap().to_string();
+        let name = installer["name"].as_str().unwrap().to_string();
+        let expected = installer["size"].as_u64().unwrap();
+
+        let path = tauri::async_runtime::block_on(download_update_asset_impl(&url, &name))
+            .expect("download failed");
+        let actual = fs::metadata(&path).expect("downloaded file missing").len();
+        assert_eq!(actual, expected, "downloaded size should match the release asset");
+        assert_eq!(resolve_update_package(&path.to_string_lossy()).unwrap(), fs::canonicalize(&path).unwrap());
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn rejects_untrusted_urls_and_paths() {
+        assert!(tauri::async_runtime::block_on(download_update_asset_impl("https://evil.test/a.exe", "a.exe")).is_err());
+        assert!(tauri::async_runtime::block_on(download_update_asset_impl(
+            &format!("{UPDATE_ASSET_PREFIX}v1.3.0/payload.txt"), "payload.txt")).is_err());
+        assert!(tauri::async_runtime::block_on(download_update_asset_impl(
+            &format!("{UPDATE_ASSET_PREFIX}v1.3.0/../../evil.exe"), "evil.exe")).is_err());
+        assert!(resolve_update_package("C:/Windows/System32/notepad.exe").is_err());
+        assert!(resolve_update_package("C:/definitely/missing/setup.exe").is_err());
+    }
 }

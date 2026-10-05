@@ -64,7 +64,9 @@
     </div>
 
     <div v-else class="list" aria-live="polite">
-      <article v-for="p in filteredProfiles" :key="p.path" class="profile-card" :class="{ disabled: !p.enabled }">
+      <ContextMenu v-for="p in filteredProfiles" :key="p.path">
+      <ContextMenuTrigger as-child>
+      <article class="profile-card" :class="{ disabled: !p.enabled }">
         <div class="app-icon" :title="p.filterValue">
           <img v-if="iconUrls[p.filterValue]" :src="iconUrls[p.filterValue]" alt="" draggable="false" />
           <AppWindow v-else class="app-icon-fallback" />
@@ -100,6 +102,19 @@
           <Button size="sm" variant="ghost" class="danger" @click="del(p)">删除</Button>
         </div>
       </article>
+      </ContextMenuTrigger>
+      <ContextMenuContent class="min-w-[12rem]">
+        <ContextMenuItem @select="edit(p)">编辑配置</ContextMenuItem>
+        <ContextMenuItem @select="goCreate">新建配置</ContextMenuItem>
+        <ContextMenuItem @select="toggle(p)">{{ p.enabled ? '停用配置' : '启用配置' }}</ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem @select="move(p, -1)">提高优先级</ContextMenuItem>
+        <ContextMenuItem @select="move(p, 1)">降低优先级</ContextMenuItem>
+        <ContextMenuItem @select="copyProfilePath(p)">复制配置文件路径</ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem variant="destructive" @select="del(p)">删除配置</ContextMenuItem>
+      </ContextMenuContent>
+      </ContextMenu>
     </div>
 
     <div v-if="creating" class="overlay" @click.self="creating = false">
@@ -198,6 +213,8 @@
 </template>
 
 <script setup lang="ts">
+import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from '@/components/ui/context-menu';
+import { useUserPreferences } from '@/store/useUserPreferences';
 import { computed, onMounted, ref, toRaw, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
@@ -504,7 +521,7 @@ async function toggle(profile: AppProfile) {
 }
 
 async function del(profile: AppProfile) {
-  if (!confirm(`删除 ${profile.fileName}？此操作会删除对应 YAML 文件。`)) return;
+  if (useUserPreferences().preferences.confirmBeforeDelete && !confirm(`删除 ${profile.fileName}？此操作会删除对应 YAML 文件。`)) return;
   try {
     await apps.remove(profile);
     await reload();
@@ -512,6 +529,11 @@ async function del(profile: AppProfile) {
   } catch (error: any) {
     toast.error(`删除失败：${error?.message ?? String(error)}`);
   }
+}
+
+async function copyProfilePath(profile: AppProfile) {
+  try { await navigator.clipboard.writeText(profile.path); toast.success('路径已复制'); }
+  catch (error) { toast.error(`复制失败：${String(error)}`); }
 }
 </script>
 
