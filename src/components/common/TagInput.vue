@@ -38,7 +38,6 @@ import { XIcon } from 'lucide-vue-next';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Badge } from '../ui/badge';
-import { cn } from '@/lib/utils';
 
 // 获取翻译函数
 const { t } = useI18n();

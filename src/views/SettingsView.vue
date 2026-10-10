@@ -1642,9 +1642,7 @@ const hasChanges = computed(() => {
 });
 
 // 获取分类名称
-const getCategoryName = (categoryId: string) => {
-  return t(`settings.sections.${categoryId}`);
-};
+
 
 // 钩子函数和调试
 onMounted(() => {
@@ -1663,7 +1661,7 @@ onMounted(() => {
 });
 
 // 错误捕获
-onErrorCaptured((err, instance, info) => {
+onErrorCaptured((err, _instance, _info) => {
   console.error('SettingsView 捕获到错误:', err);
   loadError.value = `加载设置出错: ${err.message || String(err)}`;
   return false; // 阻止错误继续传播

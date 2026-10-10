@@ -7,6 +7,7 @@ use std::{
     path::{Path, PathBuf},
     process::{Command, Stdio},
 };
+use tauri::Emitter;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -190,7 +191,36 @@ async fn read_file(file_path: String) -> Result<String, String> {
 
 #[tauri::command]
 async fn write_file(file_path: String, content: String) -> Result<(), String> {
-    fs::write(file_path, content).map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || write_file_atomic(Path::new(&file_path), &content))
+        .await.map_err(|e| e.to_string())?
+}
+
+/// Stage in the same directory so a failed write never truncates the current configuration.
+fn write_file_atomic(path: &Path, content: &str) -> Result<(), String> {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT_WRITE: AtomicU64 = AtomicU64::new(0);
+    if let Ok(metadata) = fs::metadata(path) {
+        if metadata.is_file() && metadata.permissions().readonly() {
+            return Err("Configuration file is read-only".into());
+        }
+    }
+    let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let temp = parent.join(format!(".easy-espanso-{}-{}-{}.tmp", std::process::id(),
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e| e.to_string())?.as_nanos(),
+        NEXT_WRITE.fetch_add(1, Ordering::Relaxed)));
+    let result = (|| -> std::io::Result<()> {
+        let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&temp)?;
+        file.write_all(content.as_bytes())?;
+        file.sync_all()?;
+        if let Ok(metadata) = fs::metadata(path) {
+            fs::set_permissions(&temp, metadata.permissions())?;
+        }
+        drop(file);
+        fs::rename(&temp, path)
+    })();
+    if result.is_err() { let _ = fs::remove_file(&temp); }
+    result.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -817,9 +847,10 @@ async fn get_app_icon_base64(executable: String) -> Result<String, String> {
     }
 }
 
-#[tauri::command]
-fn get_executable_under_cursor() -> Result<String, String> {
-    #[cfg(target_os = "windows")]
+/// 读取鼠标位置下方窗口所属进程的完整可执行路径。
+/// 鼠标停在 Easy Espanso 自身窗口上时视为「无目标」，避免把自己识别进去。
+#[cfg(target_os = "windows")]
+fn cursor_executable() -> Result<String, String> {
     unsafe {
         use windows_sys::Win32::Foundation::{CloseHandle, POINT};
         use windows_sys::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION};
@@ -832,6 +863,7 @@ fn get_executable_under_cursor() -> Result<String, String> {
         let mut pid = 0u32;
         GetWindowThreadProcessId(hwnd, &mut pid);
         if pid == 0 { return Err("无法识别目标进程".into()); }
+        if pid == std::process::id() { return Err("鼠标位于 Easy Espanso 自身窗口上".into()); }
         let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
         if process.is_null() { return Err("无法读取目标进程路径，请尝试以相同权限运行 Easy Espanso".into()); }
         let mut buf = vec![0u16; 32768];
@@ -841,8 +873,111 @@ fn get_executable_under_cursor() -> Result<String, String> {
         if ok == 0 { return Err("无法读取目标程序路径".into()); }
         Ok(String::from_utf16_lossy(&buf[..len as usize]))
     }
-    #[cfg(not(target_os = "windows"))]
-    { Err("拖动准星识别程序当前仅支持 Windows".into()) }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn cursor_executable() -> Result<String, String> {
+    Err("拖动准星识别程序当前仅支持 Windows".into())
+}
+
+/// 单次读取鼠标下方的可执行文件（松手那一刻调用，位置最准）。
+#[tauri::command]
+fn get_executable_under_cursor() -> Result<String, String> {
+    cursor_executable()
+}
+
+/// 左键是否仍处于按下状态（VK_LBUTTON = 0x01，取最高位为"当前按下"）。
+#[cfg(target_os = "windows")]
+fn left_button_down() -> bool {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
+    const VK_LBUTTON_CODE: i32 = 0x01;
+    unsafe { (GetAsyncKeyState(VK_LBUTTON_CODE) as u16 & 0x8000) != 0 }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn left_button_down() -> bool {
+    false
+}
+
+/// 准星实时探测的停止开关（同一时刻只允许一个探测线程）。
+#[derive(Default)]
+struct CursorProbeState {
+    stop: std::sync::Mutex<Option<std::sync::Arc<std::sync::atomic::AtomicBool>>>,
+}
+
+/// 轮询间隔：足够跟手，又不至于让 OpenProcess 变成负担。
+const CURSOR_PROBE_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
+/// 兜底上限：万一"松手"信号丢失，探测线程也不会永远跑下去。
+const CURSOR_PROBE_MAX_DURATION: std::time::Duration = std::time::Duration::from_secs(120);
+/// 起手宽限期：极快点击（按下与松开都发生在首次轮询之前）时据此判定已松手。
+const CURSOR_PROBE_GRACE: std::time::Duration = std::time::Duration::from_millis(800);
+
+/// 单步结束判定：**只有左键松开才结束本次拾取**。
+/// - 见过按下（`saw_press`）之后再松开 ⇒ 结束；
+/// - 起手后一直没观测到按下、且已超过宽限期 ⇒ 视为已松开（极快点击）；
+/// - 其余情况（按钮仍按住 / 仍在宽限期内）⇒ 继续探测。
+fn probe_should_end(button_down: bool, saw_press: &mut bool, elapsed: std::time::Duration) -> bool {
+    if button_down {
+        *saw_press = true;
+        false
+    } else {
+        *saw_press || elapsed > CURSOR_PROBE_GRACE
+    }
+}
+
+/// 开始实时探测鼠标下方的程序：每 100ms 读一次，目标变化时向前端发 `cursor-target`
+/// （载荷为 Option<String>，null 表示当前没有可识别目标）；
+/// **左键一松手就停止**（或到达兜底上限），此时发一次 `cursor-target-end` 并退出线程。
+#[tauri::command]
+fn start_cursor_probe(app: tauri::AppHandle, state: tauri::State<'_, CursorProbeState>) -> Result<(), String> {
+    stop_cursor_probe_thread(&state);
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    *state.stop.lock().map_err(|e| e.to_string())? = Some(stop.clone());
+    let app = app.clone();
+    std::thread::spawn(move || {
+        use std::sync::atomic::Ordering;
+        let started = std::time::Instant::now();
+        let mut last: Option<String> = None;
+        let mut saw_press = false;
+        let mut ended_by_release = false;
+        loop {
+            if stop.load(Ordering::Relaxed) { break; }
+            if probe_should_end(left_button_down(), &mut saw_press, started.elapsed()) {
+                ended_by_release = true;
+                break;
+            }
+            let current = cursor_executable().ok();
+            if current != last {
+                last = current.clone();
+                let _ = app.emit("cursor-target", current);
+            }
+            if started.elapsed() > CURSOR_PROBE_MAX_DURATION {
+                ended_by_release = true;
+                break;
+            }
+            std::thread::sleep(CURSOR_PROBE_INTERVAL);
+        }
+        if ended_by_release {
+            let _ = app.emit("cursor-target-end", ());
+        }
+    });
+    Ok(())
+}
+
+/// 主动停止实时探测（Esc 取消 / 前端已收尾时调用）。重复调用无副作用。
+#[tauri::command]
+fn stop_cursor_probe(state: tauri::State<'_, CursorProbeState>) -> Result<(), String> {
+    stop_cursor_probe_thread(&state);
+    Ok(())
+}
+
+fn stop_cursor_probe_thread(state: &tauri::State<'_, CursorProbeState>) {
+    use std::sync::atomic::Ordering;
+    if let Ok(mut guard) = state.stop.lock() {
+        if let Some(flag) = guard.take() {
+            flag.store(true, Ordering::Relaxed);
+        }
+    }
 }
 
 /// Fixed public release endpoint; native HTTP avoids WebView CORS restrictions.
@@ -938,18 +1073,115 @@ fn install_update_and_restart(app: tauri::AppHandle, path: String) -> Result<(),
     Ok(())
 }
 
+#[cfg(test)]
+mod cursor_probe_tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// 按住不放时，探测必须一直继续（这正是"松手才停"的核心）。
+    #[test]
+    fn keeps_probing_while_button_held() {
+        let mut saw_press = false;
+        for _ in 0..50 {
+            assert!(!probe_should_end(true, &mut saw_press, CURSOR_PROBE_GRACE * 10));
+        }
+        assert!(saw_press);
+    }
+
+    /// 松手后立刻结束，不需要再等宽限期。
+    #[test]
+    fn ends_immediately_after_release() {
+        let mut saw_press = false;
+        assert!(!probe_should_end(true, &mut saw_press, Duration::ZERO));
+        assert!(probe_should_end(false, &mut saw_press, Duration::from_millis(1)));
+    }
+
+    /// 起手还没观测到按下时不能立刻结束（否则一次点击会在首次轮询就被判死）。
+    #[test]
+    fn does_not_end_during_grace_period_before_first_press() {
+        let mut saw_press = false;
+        assert!(!probe_should_end(false, &mut saw_press, Duration::from_millis(10)));
+        assert!(!probe_should_end(false, &mut saw_press, CURSOR_PROBE_GRACE));
+    }
+
+    /// 极快点击（宽限期内始终没观测到按下）最终要能收尾，否则线程会一直挂着。
+    #[test]
+    fn ends_after_grace_period_without_any_press() {
+        let mut saw_press = false;
+        assert!(probe_should_end(false, &mut saw_press, CURSOR_PROBE_GRACE + Duration::from_millis(1)));
+    }
+}
+
+#[cfg(test)]
+mod atomic_write_tests {
+    use super::*;
+
+    fn scratch_dir() -> PathBuf {
+        let dir = env::temp_dir().join(format!("easy-espanso-atomic-test-{}-{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn atomic_write_replaces_existing_utf8_file() {
+        let dir = scratch_dir();
+        let target = dir.join("base.yml");
+        fs::write(&target, "old content").unwrap();
+        write_file_atomic(&target, "matches:\n  - trigger: ':hu'\n    replace: '你好'\n").unwrap();
+        assert!(fs::read_to_string(&target).unwrap().contains("你好"));
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
+        fs::remove_file(target).unwrap();
+        fs::remove_dir(dir).unwrap();
+    }
+
+    #[test]
+    fn failed_atomic_write_preserves_destination_and_cleans_staging_file() {
+        let dir = scratch_dir();
+        let target = dir.join("destination");
+        fs::create_dir(&target).unwrap();
+        let marker = target.join("keep.txt");
+        fs::write(&marker, "original").unwrap();
+        assert!(write_file_atomic(&target, "replacement").is_err());
+        assert_eq!(fs::read_to_string(&marker).unwrap(), "original");
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
+        fs::remove_file(marker).unwrap();
+        fs::remove_dir(target).unwrap();
+        fs::remove_dir(dir).unwrap();
+    }
+
+    #[test]
+    fn read_only_configuration_is_preserved_without_staging_files() {
+        let dir = scratch_dir();
+        let target = dir.join("base.yml");
+        fs::write(&target, "original").unwrap();
+        let original_permissions = fs::metadata(&target).unwrap().permissions();
+        let mut readonly = original_permissions.clone();
+        readonly.set_readonly(true);
+        fs::set_permissions(&target, readonly).unwrap();
+        assert!(write_file_atomic(&target, "replacement").is_err());
+        assert_eq!(fs::read_to_string(&target).unwrap(), "original");
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
+        fs::set_permissions(&target, original_permissions).unwrap();
+        fs::remove_file(target).unwrap();
+        fs::remove_dir(dir).unwrap();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
+        .manage(CursorProbeState::default())
         .invoke_handler(tauri::generate_handler![
             read_file, write_file, file_exists, directory_exists, create_directory,
             list_files, scan_directory, delete_file, delete_directory,
             rename_file_or_directory, join_path, get_platform, get_environment_variable,
             parse_yaml, serialize_yaml, get_espanso_status, control_espanso, open_in_explorer,
-            get_executable_under_cursor, export_espanso_backup, import_espanso_backup,
+            get_executable_under_cursor, start_cursor_probe, stop_cursor_probe,
+            export_espanso_backup, import_espanso_backup,
             get_app_icon_base64, get_latest_release, download_update_asset, install_update_and_restart
         ])
         .run(tauri::generate_context!())

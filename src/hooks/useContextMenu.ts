@@ -6,21 +6,11 @@ import ClipboardManager from '@/utils/ClipboardManager';
 import TreeNodeRegistry from '@/utils/TreeNodeRegistry'; // 假设这个注册表仍然用于展开/折叠状态
 import type { TreeNodeItem } from '@/types/tree.types';
 import { findParentNodeInTree, findNodeById } from '@/utils/configTreeUtils'; // 引入查找父节点工具函数
-import { Match } from '@/types/core/espanso.types';
 import { determineSnippetPosition, focusTriggerInput } from '@/utils/snippetPositionUtils';
 import * as platformService from '@/services/platformService';
 
 // --- MenuItem Interface (保持不变) ---
-interface MenuItem {
-  label: string;
-  icon?: any;
-  action?: () => void;
-  separator?: boolean;
-  disabled?: boolean;
-  variant?: 'destructive';
-  show?: boolean;
-  shortcut?: string;
-}
+
 
 export function useContextMenu(props: { node: TreeNodeItem | null } | { getNode: () => TreeNodeItem | null }) {
   const store = useEspansoStore();
@@ -104,7 +94,7 @@ export function useContextMenu(props: { node: TreeNodeItem | null } | { getNode:
       return;
     }
 
-    const { item: clipboardItem, operation } = ClipboardManager.getItem();
+    const { item: clipboardItem } = ClipboardManager.getItem();
     if (!clipboardItem) {
       toast.error('剪贴板为空');
       return;
@@ -141,7 +131,7 @@ export function useContextMenu(props: { node: TreeNodeItem | null } | { getNode:
         const parentNode = findParentNodeInTree(store.state.configTree, targetNode.id);
         if (parentNode && parentNode.type === 'file') { // 确保父节点是 File
             targetParentId = parentNode.id;
-            const siblings = parentNode.children || [];
+            const siblings = parentNode.matches || [];
             const currentMatchIndex = siblings.findIndex((item) => item.id === targetNode.id);
             currentIndex = currentMatchIndex >= 0 ? currentMatchIndex + 1 : siblings.length;
         } else {

@@ -67,11 +67,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { FolderIcon, FileIcon } from 'lucide-vue-next';
 import type { ConfigTreeNode, ConfigFileNode, ConfigFolderNode } from '@/types/core/ui.types';
-import type { Match } from '@/types/core/espanso.types';
 
 const { t } = useI18n();
 

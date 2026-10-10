@@ -1,9 +1,6 @@
 import { Match } from '@/types/core/espanso.types';
 
-interface ClipboardItem {
-  item: Match;
-  operation: 'copy' | 'cut';
-}
+
 
 // 剪贴板管理器
 class ClipboardManager {

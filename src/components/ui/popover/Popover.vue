@@ -24,7 +24,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, computed, nextTick } from 'vue';
+import { ref, onMounted, onUnmounted, watch, computed, type CSSProperties } from 'vue';
 
 const props = defineProps<{
   position?: 'top' | 'bottom' | 'left' | 'right';
@@ -43,7 +43,7 @@ const popoverRef = ref<HTMLElement | null>(null);
 const triggerRef = ref<HTMLElement | null>(null);
 
 // 计算 popover 的位置
-const popoverStyle = computed(() => {
+const popoverStyle = computed<CSSProperties>(() => {
   if (!triggerRef.value || !isOpen.value) return {};
   
   const triggerRect = triggerRef.value.getBoundingClientRect();

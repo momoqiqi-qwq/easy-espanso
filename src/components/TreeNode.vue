@@ -785,13 +785,7 @@ onUnmounted(() => {
 });
 
 // 折叠当前节点 (can be called programmatically if needed)
-const collapseNode = () => {
-  if (hasChildren.value && isOpen.value) {
-    // Use store action instead of directly modifying computed property
-    store.toggleNodeExpansion(props.node.id);
-    emit("toggle-node", props.node.id); // Notify parent if state needs to be synced
-  }
-};
+
 
 // 开始编辑节点名称
 const startEditing = () => {
@@ -888,12 +882,7 @@ const saveNodeName = async () => {
 };
 
 // 当点击匹配项左侧空白区域时，触发父节点的折叠/展开
-const toggleParentFolder = () => {
-  if (props.parentId) {
-    // Emit event for parent component to handle toggling the parent node
-    emit("toggle-node", props.parentId);
-  }
-};
+
 
 // Handler for clicking the node row (select or toggle chevron)
 const handleClick = (event: MouseEvent) => {
@@ -929,17 +918,7 @@ const handleClick = (event: MouseEvent) => {
 const nodeLevel = computed(() => props.level || 0);
 
 // 判断是否应该显示计数 (Badge with number of matches)
-const shouldShowCount = computed(() => {
-  // Only show count for Folders, Files, and Groups that actually contain matches
-  if (props.node.type === "match") return false; // Matches never show count
-  if (!hasChildren.value) return false; // Don't show if no children
 
-  // Show count if it has visible match children (calculated by visibleChildCount)
-  return visibleChildCount.value > 0;
-
-  // Alternative simpler logic: Always show for non-match nodes with children?
-  // return props.node.type !== 'match' && hasChildren.value;
-});
 
 // No longer need to watch isOpen as it's now a computed property
 // and changes are handled by the store

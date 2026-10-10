@@ -66,7 +66,6 @@ import {
 } from "@/components/ui/context-menu";
 import { useContextMenu } from "@/hooks/useContextMenu";
 import { ref, defineProps, defineEmits, computed } from "vue";
-import ClipboardManager from "@/utils/ClipboardManager";
 import type { TreeNodeItem } from "@/types/tree.types";
 import { useI18n } from "vue-i18n";
 

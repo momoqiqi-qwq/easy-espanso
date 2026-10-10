@@ -1,5 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
+import { isEqual } from 'lodash-es';
+import { replaceVariants, matchTriggers, sameTriggers } from '@/utils/choiceVariants';
 import { toast } from 'vue-sonner'; // Assuming toast notifications are still used
 import { v4 as uuidv4 } from 'uuid';
 
@@ -76,6 +78,14 @@ export const useEspansoStore = defineStore('espanso', () => {
         modifiedNodeIds: new Set<string>(), // 初始化修改节点集合
         justSavedNodeIds: new Set<string>(), // 初始化刚保存节点集合
     });
+
+    // Serialize edits that share reactive file state; failed operations do not block later edits.
+    let mutationQueue: Promise<unknown> = Promise.resolve();
+    const runMutation = <T>(action: () => Promise<T>): Promise<T> => {
+        const result = mutationQueue.then(action);
+        mutationQueue = result.catch(() => undefined);
+        return result;
+    };
 
     // --- Getters (Computed Properties) ---
 
@@ -568,7 +578,7 @@ export const useEspansoStore = defineStore('espanso', () => {
         }
     };
 
-    const updateMatch = async (matchId: string, updates: Partial<Match>) => {
+    const updateMatch = (matchId: string, updates: Partial<Match>) => runMutation(async () => {
         checkpoint('编辑片段');
         const result = findItemInTreeById(state.value.configTree, matchId);
         if (!result || result.type !== 'match') {
@@ -608,11 +618,39 @@ export const useEspansoStore = defineStore('espanso', () => {
             matchRef.updatedAt = previousUpdatedAt;
             throw err;
         }
-    };
+    });
 
 
 
-    const addItem = async (itemData: Omit<Match, 'id'|'type'|'guiOrder'>, itemType: 'match', targetParentNodeId: string | null, insertIndex: number = -1, historyLabel: string = '新建片段') => {
+    /** Save a dialog's complete group as one file write and one undo checkpoint. */
+    const saveChoiceVariants = (filePath: string, expected: Match[], variants: Match[]) => runMutation(async () => {
+        const file = findFileNode(state.value.configTree, filePath);
+        if (!file || !expected.length || !variants.length) throw new Error('Invalid choice group');
+        const ids = expected.map(match => match.id);
+        const current = (file.matches || []).filter(match => ids.includes(match.id));
+        if (!isEqual(current, expected)) throw new Error('方案已在其他操作中修改，请重新打开编辑器');
+        if (new Set(variants.map(match => match.id)).size !== variants.length) throw new Error('Duplicate choice ID');
+        const remainingIds = new Set((file.matches || []).filter(match => !ids.includes(match.id)).map(match => match.id));
+        if (variants.some(match => remainingIds.has(match.id))) throw new Error('Choice ID is already in use');
+        if (!matchTriggers(variants[0]).length || variants.some(match => !sameTriggers(match, variants[0]))) throw new Error('Every choice needs the same trigger');
+        const snapshot = _snapshot();
+        const now = new Date().toISOString();
+        const next = replaceVariants(file.matches || [], ids, safeClone(variants).map(match => ({ ...match, filePath, type: 'match', updatedAt: now })));
+        await espansoService.saveConfigurationFile(filePath, next, file.content || {});
+        history.push('编辑多选方案', snapshot, userPreferences.preferences.historyLimit);
+        file.matches = next;
+        variants.forEach(match => markNodeAsSaved(match.id));
+        ids.filter(id => !variants.some(match => match.id === id)).forEach(id => {
+            state.value.modifiedNodeIds.delete(id);
+            state.value.justSavedNodeIds.delete(id);
+        });
+        if (ids.includes(state.value.selectedItemId || '') && !variants.some(match => match.id === state.value.selectedItemId)) {
+            selectItem(variants[0].id, 'match');
+        }
+        return next.filter(match => variants.some(variant => variant.id === match.id));
+    });
+
+    const addItem = (itemData: Omit<Match, 'id'|'type'|'guiOrder'>, itemType: 'match', targetParentNodeId: string | null, insertIndex: number = -1, historyLabel: string = '新建片段') => runMutation(async () => {
         checkpoint(historyLabel);
         _setStatus(`Adding ${itemType}...`);
         try {
@@ -670,12 +708,8 @@ export const useEspansoStore = defineStore('espanso', () => {
                 ? Math.max(...existingMatches.map(m => m.guiOrder ?? 0)) + 1
                 : 1;
 
-            // 3. 生成新的确定性 ID
-            const newMatchId = generateMatchId(
-                itemData,
-                finalTargetFilePath, // 使用确定的路径
-                newGuiOrder
-            );
+            // New rows need session-unique IDs even after reorder/delete operations.
+            const newMatchId = `match-${uuidv4()}`;
 
             // 4. 创建新的 Match 对象
             const newItem: Match = {
@@ -718,10 +752,10 @@ export const useEspansoStore = defineStore('espanso', () => {
             _setError(`添加失败: ${err.message}`);
             return null;
         }
-    };
+    });
 
 
-    const deleteItem = async (itemId: string, itemType: 'match' ) => {
+    const deleteItem = (itemId: string, itemType: 'match' ) => runMutation(async () => {
          checkpoint('删除片段');
          const itemRef = findItemInTreeById(state.value.configTree, itemId);
          if (!itemRef || itemRef.type !== itemType) {
@@ -789,10 +823,10 @@ export const useEspansoStore = defineStore('espanso', () => {
              console.error(`Failed to delete ${itemType} ${itemId}:`, err);
              _setError(`删除失败: ${err.message}`);
          }
-    };
+    });
 
-    const moveItem = async (itemId: string, targetParentNodeId: string | null, newIndex: number, historyLabel: string = '移动片段') => {
-        checkpoint(historyLabel);
+    const moveItem = (itemId: string, targetParentNodeId: string | null, newIndex: number, historyLabel: string = '移动片段') => runMutation(async () => {
+        const beforeMove = _snapshot();
         const movedItemRef = findItemInTreeById(state.value.configTree, itemId);
         if (!movedItemRef || (movedItemRef.type !== 'match' )) {
             _setError(`项目 ${itemId} 未找到或不是有效的片段/分组。`);
@@ -857,13 +891,14 @@ export const useEspansoStore = defineStore('espanso', () => {
             reindexFile(originalFilePath);
             if (movedBetweenFiles) reindexFile(newFilePath);
 
-            // 5. Save affected files
-            if (movedBetweenFiles) {
-                 await _saveFileByPath(originalFilePath); // Save old file (now without the item)
-                 await _saveFileByPath(newFilePath);    // Save new file (now with the item)
-            } else {
-                await _saveFileByPath(originalFilePath); // Save the modified file
-            }
+            // Stage both files together; the service restores the source if the destination fails.
+            const paths = movedBetweenFiles ? [originalFilePath, newFilePath] : [originalFilePath];
+            await espansoService.saveConfigurationFiles(paths.map(path => {
+                const file = findFileNode(state.value.configTree, path);
+                if (!file) throw new Error(`File node not found: ${path}`);
+                return { filePath: path, itemsToSave: file.matches || [], existingYamlData: file.content || {} };
+            }));
+            history.push(historyLabel, beforeMove, userPreferences.preferences.historyLimit);
 
             // 6. Update selection (optional, could keep it selected)
             selectItem(itemId, movedItemRef.type);
@@ -872,10 +907,11 @@ export const useEspansoStore = defineStore('espanso', () => {
             setTimeout(() => { if (state.value.statusMessage === `已移动: ${itemName}`) _setStatus(null); }, 2000);
 
         } catch (err: any) {
+             state.value.configTree = beforeMove.configTree;
              console.error(`Failed to move item ${itemId}:`, err);
              _setError(`移动失败: ${err.message}`);
         }
-    };
+    });
 
     const pasteItem = async (targetParentNodeId: string | null, insertIndex: number = -1) => {
         const { item: clipboardItem, operation } = ClipboardManager.getItem();
@@ -1492,6 +1528,7 @@ export const useEspansoStore = defineStore('espanso', () => {
         toggleLeftMenu,
         updateGlobalConfig,
         updateMatch,
+        saveChoiceVariants,
         addItem,
         deleteItem,
         moveItem,

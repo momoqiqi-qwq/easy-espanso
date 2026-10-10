@@ -31,35 +31,8 @@ export const generateRandomId = (prefix: 'match' | 'group'): string => {
 };
 
 /**
- * 清理字符串，使其适合作为 ID 的一部分。
- * 移除非字母数字字符，并用下划线替换，然后转为小写。
- * @param part 原始字符串部分。
- * @returns 清理后的字符串。
- */
-const sanitizeForIdPart = (part: string | undefined | null): string => {
-  if (part === null || part === undefined || part.trim() === '') {
-    return '_empty_';
-  }
-  // 替换非字母数字字符为下划线
-  let sanitized = part.toLowerCase().replace(/[^a-z0-9]/gi, '_');
-  // 替换多个连续下划线为一个
-  sanitized = sanitized.replace(/_+/g, '_');
-  // 移除可能存在的前导和尾随下划线 (除非整个字符串就是'_')
-  if (sanitized.length > 1) {
-    if (sanitized.startsWith('_')) {
-      sanitized = sanitized.substring(1);
-    }
-    if (sanitized.endsWith('_')) {
-      sanitized = sanitized.slice(0, -1);
-    }
-  }
-  // 如果处理后为空字符串（例如，原始输入只包含特殊字符），返回一个占位符
-  return sanitized || '_invalid_';
-};
-
-/**
  * 为 Match 对象生成一个确定性的 ID。
- * ID 结构: match-[sanitized_filePath_basename]-[sanitized_primary_trigger]-[guiOrder]
+ * ID 包含完整文件路径、原始触发词与序号，避免同名文件和字符清理造成碰撞。
  * @param rawMatchInfo 从 YAML 解析出的原始对象或部分 Match 信息 (只需要 trigger/triggers/label)。
  * @param filePath 该 Match 所属文件的路径。
  * @param guiOrder 该 Match 在文件中的顺序。
@@ -81,18 +54,10 @@ export const generateMatchId = (
         primaryTriggerContent = 'notrigger';
     }
 
-    // 从文件路径中提取基本名称 (文件名，不含扩展名)，避免过长的ID和潜在的特殊字符
-    const filePathParts = filePath.split(/[\\/]/);
-    const fileNameWithExt = filePathParts.pop() || '_unknownfile_';
-    // 移除最后一个扩展名 (e.g. base.yml -> base, package.name.yml -> package.name)
-    const fileName = fileNameWithExt.includes('.') ? fileNameWithExt.substring(0, fileNameWithExt.lastIndexOf('.')) : fileNameWithExt;
+    // Retain the complete path and exact trigger: basename/sanitization loses identity.
+    const identity = JSON.stringify([filePath.replace(/\\/g, '/'), primaryTriggerContent, guiOrder]);
+    const baseId = `match-${identity}`;
 
-    const sanitizedFilePath = sanitizeForIdPart(fileName);
-    const sanitizedTrigger = sanitizeForIdPart(primaryTriggerContent);
-
-    // 构造基础的确定性 ID 字符串
-    const baseId = `match-${sanitizedFilePath}-${sanitizedTrigger}-${guiOrder}`;
-    
     // 调用 encodeNodeId 对生成的基础 ID 进行编码
     const encodedId = encodeNodeId(baseId);
     
@@ -137,6 +102,8 @@ export const processMatch = (
     })).filter(v => v.name.trim() !== '' && v.type.trim() !== ''); // 过滤掉无效的 var
 
     const processed: Match = {
+        // Keep fields not exposed by the editor (for example regex and per-rule overrides).
+        ...rawMatch,
         // --- 内部字段 ---
         id: newId,
         type: 'match',
@@ -239,7 +206,13 @@ export const processMatch = (
  */
 export const cleanMatchForSaving = (match: Match): EspansoMatchYaml => {
     console.log('cleanMatchForSaving match', match);
-    const cleaned: EspansoMatchYaml = {};
+    const managed = new Set([
+        'id', 'type', 'filePath', 'guiOrder', 'updatedAt', 'createdAt', 'content', 'contentType', 'forceMode', 'tags',
+        'trigger', 'triggers', 'replace', 'markdown', 'html', 'image_path', 'form', 'label', 'description',
+        'word', 'left_word', 'right_word', 'propagate_case', 'case_sensitive', 'uppercase_style',
+        'force_mode', 'force_clipboard', 'apps', 'exclude_apps', 'vars', 'search_terms', 'priority', 'hotkey',
+    ]);
+    const cleaned: EspansoMatchYaml = Object.fromEntries(Object.entries(match).filter(([key]) => !managed.has(key)));
 
     // Trigger/Triggers (优先 triggers)
     if (Array.isArray(match.triggers) && match.triggers.length > 0) {
@@ -336,4 +309,3 @@ export const cleanMatchForSaving = (match: Match): EspansoMatchYaml => {
     console.log('cleaned', cleaned);
     return cleaned;
 };
-

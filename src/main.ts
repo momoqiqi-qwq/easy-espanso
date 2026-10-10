@@ -14,7 +14,7 @@ import { toast } from 'vue-sonner'
 const app = createApp(App)
 
 // 添加全局错误处理器
-app.config.errorHandler = (err, instance, info) => {
+app.config.errorHandler = (err, _instance, info) => {
   console.error('Vue全局错误:', err);
   console.error('错误位置:', info);
   

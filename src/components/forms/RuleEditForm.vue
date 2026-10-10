@@ -29,6 +29,10 @@
         </div>
       </div>
 
+      <!-- 多选方案依赖全局片段树（configTree）定位文件，独立模式下不适用 -->
+      <ChoiceVariantsEditor v-if="props.rule && !isStandalone" :rule="props.rule" :get-current-draft="getFormData" :busy="isSaving"
+        @update:open="choicesOpen = $event" @saved="handleChoicesSaved" />
+
       <!-- 内容类型选择器 & 替换内容 -->
       <div class="space-y-2 flex-1 flex flex-col overflow-hidden">
         <div class="flex items-center justify-between">
@@ -509,8 +513,16 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
 import { Checkbox } from "../ui/checkbox";
+import { Label } from "../ui/label";
+import {
+  Menubar,
+  MenubarMenu,
+  MenubarTrigger,
+} from "../ui/menubar";
 import TagInput from "../common/TagInput.vue";
 import VariableSelector from "./VariableSelector.vue";
+import ChoiceVariantsEditor from "./ChoiceVariantsEditor.vue";
+import { safeClone } from "@/utils/safeClone";
 import {
   Tooltip,
   TooltipContent,
@@ -580,11 +592,30 @@ const props = defineProps({
     type: Object as PropType<Match | null>,
     required: true,
   },
+  /**
+   * 自定义持久化回调。传入后本编辑器进入「独立模式」：
+   * 不再调用 store.updateMatch 写全局片段树，也不污染全局脏标记，
+   * 供「应用专用片段」这类不属于 configTree 的场景复用同一个编辑界面。
+   */
+  saveHandler: {
+    type: Function as PropType<
+      (ruleId: string | number | undefined, data: Partial<Match>) => Promise<void> | void
+    >,
+    default: undefined,
+  },
   // isModal: { // Example prop if needed
   //   type: Boolean,
   //   default: false,
   // }
 });
+
+/** 宿主接管持久化时为 true，此时跳过所有全局片段树相关的副作用 */
+const isStandalone = computed(() => typeof props.saveHandler === "function");
+
+/** 全局脏标记只在「片段管理」场景下维护，独立模式不要污染它 */
+function setGlobalDirty(value: boolean) {
+  if (!isStandalone.value) store.state.hasUnsavedChanges = value;
+}
 
 // Define emits
 const emit = defineEmits<{
@@ -599,6 +630,7 @@ const emit = defineEmits<{
 const store = useEspansoStore();
 const userPreferences = useUserPreferences();
 const formStore = useFormStore();
+const choicesOpen = ref(false);
 // Map rule to formData - Use RuleFormState here
 const mapRuleToFormData = (rule: Match | null): RuleFormState => {
   if (!rule) {
@@ -975,7 +1007,7 @@ watch(
       formData.value = mapRuleToFormData(newRule);
       originalFormData.value = JSON.parse(JSON.stringify(formData.value)); // Update original data too
       isFormModified.value = false; // Reset modified state
-      store.state.hasUnsavedChanges = false;
+      setGlobalDirty(false);
     }
   },
   // 只需监听 rule 引用变化（回调只比较 id），deep 遍历整个对象是浪费
@@ -1027,7 +1059,7 @@ const checkFormModified = () => {
   if (!originalFormData.value) {
     console.log("检查修改：原始数据为空");
     isFormModified.value = false;
-    store.state.hasUnsavedChanges = false;
+    setGlobalDirty(false);
     emit("modified", false);
     return;
   }
@@ -1039,7 +1071,7 @@ const checkFormModified = () => {
 
   // 更新状态
   isFormModified.value = hasChanged;
-  store.state.hasUnsavedChanges = hasChanged;
+  setGlobalDirty(hasChanged);
   // 触发 modified 事件，将修改状态传递给父组件
   emit("modified", hasChanged);
 
@@ -1047,7 +1079,7 @@ const checkFormModified = () => {
   if (hasChanged && props.rule?.id) {
     formStore.saveFormData(props.rule.id, formState.value);
     // 标记节点为已修改状态
-    store.markNodeAsModified(props.rule.id);
+    if (!isStandalone.value) store.markNodeAsModified(props.rule.id);
     console.log(
       `[RuleEditForm] 已保存修改后的表单数据到 FormStore: ${props.rule.id}`
     );
@@ -1307,109 +1339,23 @@ const onSubmit = async (): Promise<void> => {
         return;
       }
 
-      // 准备要保存的数据
-      const dataToSave: Partial<Match> & { contentType?: ContentType } = {
-        // <--- 明确包含 contentType
-        // Process trigger/triggers
-        ...(formState.value.trigger.includes("\n") ||
-          formState.value.trigger.includes(",")
-          ? {
-            triggers: formState.value.trigger
-              .split(/[\n,]/)
-              .map((t) => t.trim())
-              .filter((t) => t),
-          }
-          : { trigger: formState.value.trigger.trim() }),
-        // Explicitly delete the other trigger field if one exists
-        ...(formState.value.trigger.includes("\n") ||
-          formState.value.trigger.includes(",")
-          ? { trigger: undefined }
-          : { triggers: undefined }),
+      // Use the same complete draft for ordinary saves and multi-choice edits.
+      const dataToSave = getFormData();
 
-        label: formState.value.label || undefined,
-        // 布尔值需要明确设置，而不是用 || undefined 的方式
-        word: formState.value.word,
-        left_word: formState.value.leftWord,
-        right_word: formState.value.rightWord,
-        propagate_case: formState.value.propagateCase,
-        uppercase_style: formState.value.uppercaseStyle || undefined,
-        force_mode:
-          formState.value.forceMode === "" ||
-            formState.value.forceMode === "default"
-            ? undefined
-            : formState.value.forceMode, // Map empty/default back to undefined for saving
-        apps:
-          formState.value.apps && formState.value.apps.length > 0
-            ? formState.value.apps
-            : undefined,
-        exclude_apps:
-          formState.value.exclude_apps &&
-            formState.value.exclude_apps.length > 0
-            ? formState.value.exclude_apps
-            : undefined,
-        search_terms:
-          formState.value.search_terms &&
-            formState.value.search_terms.length > 0
-            ? formState.value.search_terms
-            : undefined,
-        priority: formState.value.priority || undefined,
-        hotkey: formState.value.hotkey || undefined,
-        vars:
-          formState.value.vars && formState.value.vars.length > 0
-            ? formState.value.vars
-            : undefined,
-
-        // !!! 始终包含 contentType !!!
-        contentType: currentContentType.value, // <--- 添加这一行
-
-        // 移除所有旧的内容相关字段 (replace/markdown/html/image_path)
-        // 这些将在下面的 switch 中被正确设置
-        replace: undefined,
-        markdown: undefined,
-        html: undefined,
-        image_path: undefined,
-        content: undefined, // 移除临时的 content 字段
-      };
-
-      // 根据当前内容类型，只添加对应的字段
-      switch (currentContentType.value) {
-        case "plain":
-          dataToSave.replace = formState.value.content;
-          break;
-
-        case "markdown":
-          dataToSave.markdown = formState.value.content;
-          break;
-
-        case "html":
-          dataToSave.html = formState.value.content;
-          break;
-
-        case "image":
-          dataToSave.image_path = formState.value.content;
-          break;
-
-        case "form":
-          // 表单内容通常存在 replace 或 content 字段，并依赖 contentType 区分
-          // 假设表单定义存储在 replace 字段
-          dataToSave.replace = formState.value.content;
-          console.log("保存表单内容到 replace 字段");
-          break;
-
-        default:
-          console.error("未知的内容类型:", currentContentType.value);
-          dataToSave.replace = formState.value.content; // Fallback
+      // 独立模式：持久化交给宿主（应用专用片段等非 configTree 场景）
+      if (isStandalone.value) {
+        Promise.resolve(props.saveHandler!(props.rule?.id, dataToSave))
+          .then(() => {
+            console.log("保存成功（独立模式）。");
+            resolve();
+          })
+          .catch((error) => {
+            console.error("保存失败:", error);
+            toast.error(`保存失败: ${error.message || "未知错误"}`);
+            reject(error);
+          });
+        return;
       }
-
-      // 清理所有值为 undefined 的字段
-      Object.keys(dataToSave).forEach((key) => {
-        if (dataToSave[key as keyof typeof dataToSave] === undefined) {
-          delete dataToSave[key as keyof typeof dataToSave];
-        }
-      });
-
-      // 记录最终保存的数据结构
-      console.log("最终保存的数据:", JSON.stringify(dataToSave, null, 2));
 
       // 调用 emit 保存数据，并添加必要的检查
       if (props.rule && props.rule.id !== undefined && props.rule.id !== null) {
@@ -1446,7 +1392,7 @@ const onCancel = () => {
   if (isFormModified.value) {
     if (confirm(t("snippets.form.autoSave.unsavedChanges"))) {
       isFormModified.value = false;
-      store.state.hasUnsavedChanges = false;
+      setGlobalDirty(false);
     }
   }
 };
@@ -1455,7 +1401,7 @@ const onCancel = () => {
 // 组件卸载前检查未保存的修改
 onBeforeUnmount(() => {
   // 确保组件卸载时重置全局状态
-  store.state.hasUnsavedChanges = false;
+  setGlobalDirty(false);
   stopHotkeyRecording();
 });
 
@@ -1630,7 +1576,7 @@ watch(
       formData.value = mapRuleToFormData(newRule);
       originalFormData.value = JSON.parse(JSON.stringify(formData.value)); // Update original data too
       isFormModified.value = false; // Reset modified state
-      store.state.hasUnsavedChanges = false;
+      setGlobalDirty(false);
     }
   },
   { immediate: true, deep: true }
@@ -1689,7 +1635,7 @@ const resetModifiedState = (savedData: Partial<Match>) => {
   nextTick(() => {
     originalFormData.value = JSON.parse(JSON.stringify(formState.value));
     isFormModified.value = false; // Reset modified flag
-    store.state.hasUnsavedChanges = false; // Sync global state
+    setGlobalDirty(false); // Sync global state
     isInitialized.value = true; // Re-enable modification checks
     console.log("[RuleEditForm] State and baseline reset complete.");
   });
@@ -1724,6 +1670,10 @@ const getFormData = (): Partial<Match> => {
       Array.isArray(formState.value.vars) && formState.value.vars.length > 0
         ? [...formState.value.vars]
         : undefined,
+    apps: formState.value.apps?.length ? [...formState.value.apps] : undefined,
+    exclude_apps: formState.value.exclude_apps?.length ? [...formState.value.exclude_apps] : undefined,
+    forceMode: formState.value.forceMode || "default",
+    content: undefined,
     contentType: currentContentType.value, // 确保包含 contentType
 
     // 显式将所有内容字段初始化为 undefined
@@ -1773,12 +1723,7 @@ const getFormData = (): Partial<Match> => {
       dataToSave.replace = formState.value.content; // Fallback
   }
 
-  // 清理多余字段
-  Object.keys(dataToSave).forEach((key) => {
-    if (dataToSave[key as keyof typeof dataToSave] === undefined) {
-      delete dataToSave[key as keyof typeof dataToSave];
-    }
-  });
+  // Undefined fields deliberately clear the previous trigger/content type in the store.
 
   return dataToSave;
 };
@@ -1793,6 +1738,7 @@ const autoSave = async (options: { showToast?: boolean } = {}) => {
   // showToast=false 代表失焦/控件变化触发的隐式自动保存；用户关闭自动保存时应直接跳过。
   // showToast=true 通常来自显式“保存”操作，仍然允许执行。
   const showToast = options.showToast !== false;
+  if (choicesOpen.value || isSaving.value) return;
   if (!showToast && !userPreferences.preferences.autoSave) {
     return;
   }
@@ -1809,6 +1755,7 @@ const autoSave = async (options: { showToast?: boolean } = {}) => {
       saveStateTimeout = null;
     }
 
+    const submittedState = safeClone(formState.value);
     isSaving.value = true;
     saveState.value = "idle";
 
@@ -1827,22 +1774,12 @@ const autoSave = async (options: { showToast?: boolean } = {}) => {
       // 确认是否成功保存词边界设置
       console.log(`[RuleEditForm] 保存后词边界设置确认 - word: ${formState.value.word}, leftWord: ${formState.value.leftWord}, rightWord: ${formState.value.rightWord}`);
 
-      // 确保修改状态被重置
-      isFormModified.value = false;
-      store.state.hasUnsavedChanges = false;
-      emit("modified", false);
-
-      // 更新原始表单数据
-      originalFormData.value = JSON.parse(JSON.stringify(formState.value));
-
-      // 从 FormStore 中删除保存的表单数据
-      if (props.rule?.id) {
+      // Edits made while writing remain dirty instead of being mistaken for saved content.
+      originalFormData.value = submittedState;
+      checkFormModified();
+      if (!isFormModified.value && props.rule?.id) {
         formStore.deleteFormData(props.rule.id);
-        // 标记节点为已保存状态
-        store.markNodeAsSaved(props.rule.id);
-        console.log(
-          `[RuleEditForm] 自动保存成功，已从 FormStore 中删除表单数据: ${props.rule.id}`
-        );
+        if (!isStandalone.value) store.markNodeAsSaved(props.rule.id);
       }
 
       console.log("[RuleEditForm] 自动保存成功，状态已重置。");
@@ -1865,6 +1802,14 @@ const autoSave = async (options: { showToast?: boolean } = {}) => {
     }
   }
 };
+
+function handleChoicesSaved(match: Match) {
+  if (match.id !== props.rule?.id) return;
+  formStore.deleteFormData(match.id);
+  resetModifiedState(match);
+  emit("modified", false);
+  emit("save-success");
+}
 
 // --- defineExpose 블록 ---
 defineExpose({
@@ -1908,7 +1853,7 @@ watch(
     nextTick(() => {
       originalFormData.value = JSON.parse(JSON.stringify(formState.value));
       isFormModified.value = false;
-      store.state.hasUnsavedChanges = false; // Reset global state on item change
+      setGlobalDirty(false); // Reset global state on item change
       isInitialized.value = true;
       console.log(
         "[RuleEditForm Watcher] Form reset complete after ID change."
@@ -1957,7 +1902,7 @@ onMounted(() => {
       nextTick(() => {
         originalFormData.value = JSON.parse(JSON.stringify(formState.value));
         isFormModified.value = true; // 设置为已修改，因为是从 FormStore 恢复的未保存数据
-        store.state.hasUnsavedChanges = true;
+        setGlobalDirty(true);
         isInitialized.value = true;
         console.log("[RuleEditForm] 组件挂载，从 FormStore 恢复表单数据完成。");
         emit("modified", true); // 通知父组件表单已修改

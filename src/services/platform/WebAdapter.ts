@@ -30,7 +30,7 @@ export class WebAdapter implements IPlatformAdapter {
         return Promise.resolve(''); // 无法读取本地文件
     }
 
-    async writeFile(filePath: string, content: string): Promise<void> {
+    async writeFile(filePath: string, _content: string): Promise<void> {
         console.warn(`[WebAdapter] writeFile(${filePath}) is not available in web environment.`);
         // 可以考虑使用 localStorage 模拟极简情况，但不推荐
         return Promise.resolve();
@@ -71,7 +71,7 @@ export class WebAdapter implements IPlatformAdapter {
          return Promise.resolve();
      }
 
-      async renameFileOrDirectory(oldPath: string, newPath: string): Promise<void> {
+      async renameFileOrDirectory(_oldPath: string, _newPath: string): Promise<void> {
          console.warn(`[WebAdapter] renameFileOrDirectory is not available in web environment.`);
          return Promise.resolve();
      }
@@ -145,7 +145,7 @@ export class WebAdapter implements IPlatformAdapter {
         });
     }
 
-    async showSaveDialog(options: SaveDialogOptions): Promise<SaveDialogResult> {
+    async showSaveDialog(_options: SaveDialogOptions): Promise<SaveDialogResult> {
         console.warn(`[WebAdapter] showSaveDialog is not directly possible in web environment.`);
         // 浏览器无法直接触发"另存为"到任意路径
         // 可以模拟下载：创建一个包含内容的 Blob URL 并触发下载

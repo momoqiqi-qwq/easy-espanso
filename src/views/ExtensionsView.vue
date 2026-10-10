@@ -335,7 +335,7 @@ export LANG='zh_CN.UTF-8'</code></pre>
             <div>
               <div class="font-medium">{{ t('extensions.docs.globalVars') }}</div>
               <p class="text-muted-foreground mt-1">{{ t('extensions.docs.globalVarsDesc') }}</p>
-              <pre class="mt-2 p-3 rounded-md bg-muted text-xs overflow-x-auto leading-relaxed"><code>global_vars:
+              <pre class="mt-2 p-3 rounded-md bg-muted text-xs overflow-x-auto leading-relaxed"><code v-pre>global_vars:
   - name: pscript
     type: echo
     params:
@@ -356,7 +356,7 @@ matches:
             <div>
               <div class="font-medium">{{ t('extensions.docs.anchors') }}</div>
               <p class="text-muted-foreground mt-1">{{ t('extensions.docs.anchorsDesc') }}</p>
-              <pre class="mt-2 p-3 rounded-md bg-muted text-xs overflow-x-auto leading-relaxed"><code>anchors:
+              <pre class="mt-2 p-3 rounded-md bg-muted text-xs overflow-x-auto leading-relaxed"><code v-pre>anchors:
   script1: &amp;script1 |
     print("hello")
 

@@ -17,7 +17,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onErrorCaptured, h } from 'vue';
+import { ref, onErrorCaptured } from 'vue';
 import { useRouter } from 'vue-router';
 
 const router = useRouter();
@@ -26,7 +26,7 @@ const errorMessage = ref('');
 const errorInstance = ref<Error | null>(null);
 
 // 捕获子组件的错误
-onErrorCaptured((err, instance, info) => {
+onErrorCaptured((err, _instance, info) => {
   console.error('ErrorBoundary 捕获到错误:', err, info);
   errorCaptured.value = true;
   errorInstance.value = err;

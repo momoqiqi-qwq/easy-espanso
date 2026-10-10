@@ -4,7 +4,6 @@
  */
 
 import type { ConfigTreeNode } from '@/types/core/ui.types';
-import type { Match } from '@/types/core/espanso.types';
 import { findItemInTreeById, findParentNodeInTree } from '@/utils/configTreeUtils';
 
 /**

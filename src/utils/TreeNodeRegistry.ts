@@ -110,7 +110,7 @@ class TreeNodeRegistry {
    */
   public getAllWithParentId(parentId: string): Array<{ info: NodeInfo, nodeData?: NodeData }> {
     const result: Array<{ info: NodeInfo, nodeData?: NodeData }> = [];
-    for (const [id, node] of this.registry.entries()) {
+    for (const node of this.registry.values()) {
       if (node.nodeData?.parentId === parentId) {
         result.push(node);
       }

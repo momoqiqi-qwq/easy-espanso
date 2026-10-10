@@ -129,7 +129,7 @@ const status = ref<EspansoRuntimeStatus>({
 });
 
 const osType = getOSType();
-const osName = computed(() => ({ windows: 'Windows', macos: 'macOS', linux: 'Linux' }[osType] || t('common.unknown')));
+const osName = computed(() => ({ windows: 'Windows', macos: 'macOS', linux: 'Linux', unknown: t('common.unknown') }[osType] || t('common.unknown')));
 const runtimeLabel = computed(() => {
   if (isChecking.value) return t('installation.checking');
   if (!status.value.installed) return t('installation.notInstalled');

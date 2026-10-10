@@ -77,30 +77,23 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted, watch, nextTick } from 'vue';
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue';
 import { useEspansoStore } from '../../store/useEspansoStore';
 import { useUserPreferences } from '../../store/useUserPreferences';
 import { useContextMenu } from '@/hooks/useContextMenu';
 import { useI18n } from 'vue-i18n'; // 导入 useI18n
 import ClipboardManager from '@/utils/ClipboardManager';
-import TreeNodeRegistry from '@/utils/TreeNodeRegistry';
 import { findItemInTreeById, findParentNodeInTree } from '@/utils/configTreeUtils'; // 导入 findParentNodeInTree
 import type { Match } from '@/types/core/espanso.types'; // 导入类型
 import type { ConfigTreeNode, ConfigFileNode } from '@/types/core/ui.types'; // 导入 ConfigFileNode
-import type { TreeNodeItem } from '@/types/tree.types';
 import { toast } from 'vue-sonner'; // 导入 toast
 import { isMacOS } from '@/lib/utils'; // 导入 isMacOS
-import { SaveIcon, Loader2Icon, CheckIcon, XIcon, EyeIcon } from 'lucide-vue-next'; // 图标
+import { XIcon, EyeIcon } from 'lucide-vue-next'; // 图标
+ // 图标
 import { Button } from '../ui/button'; // UI 组件
-import { Checkbox } from '../ui/checkbox';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "../ui/tooltip";
+
 import RuleEditForm from '../forms/RuleEditForm.vue';   // 规则编辑表单
-import GroupEditForm from '../forms/GroupEditForm.vue'; // 分组编辑表单
+ // 分组编辑表单
 import FileDetailsPanel from './FileDetailsPanel.vue';  // 文件/文件夹详情面板
 
 // --- Refs 和 Store 实例 ---
@@ -127,7 +120,7 @@ let saveSuccessTimeout: ReturnType<typeof setTimeout> | null = null;
 
 // --- 计算属性 ---
 const selectedItem = computed(() => store.selectedItem as Match | ConfigTreeNode | null); // 类型断言
-const selectedId = computed(() => store.state.selectedItemId);
+
 
 // 将选中项转换为 ConfigTreeNode 类型（仅当是文件或文件夹时）
 const selectedNodeAsTreeNode = computed(() => {
@@ -243,60 +236,7 @@ const onPreviewImageError = (e: Event) => {
 };
 
 // 保存项目
-const saveItem = async () => {
-  const currentItem = selectedItem.value;
-  if (!currentItem || isSaving.value) return;
-  // ... (clear timeout logic) ...
-  if (saveStateTimeout) {
-    clearTimeout(saveStateTimeout);
-    saveStateTimeout = null;
-  }
 
-  if (!isFormModified.value) {
-    // ... (handle already saved case) ...
-    saveState.value = 'success';
-    saveStateTimeout = setTimeout(() => {
-      saveState.value = 'idle';
-    }, 1500);
-    return;
-  }
-
-  isSaving.value = true;
-  saveState.value = 'idle';
-
-  let formData: Partial<Match> | null = null;
-  let success = false;
-
-  try {
-    if (currentItem.type === 'match' && ruleFormRef.value) {
-      formData = ruleFormRef.value.getFormData(); // Get data TO save
-      if (!formData) throw new Error("无法获取规则表单数据");
-
-      console.log('[RightPane] Saving Match:', currentItem.id, formData);
-      await store.updateMatch(currentItem.id, formData as Partial<Match>); // Call Store Action
-
-      // ----------------------------------------------------
-
-      success = true;
-      isFormModified.value = false; // Reset parent's modified state
-      saveState.value = 'success';
-      toast.success("保存成功！");
-
-    } else {
-      throw new Error("没有找到对应的表单组件或选中的项目类型无效");
-    }
-
-  } catch (error: any) {
-    console.error('保存项目失败 (saveItem): ', error);
-    saveState.value = 'error';
-    toast.error(`保存失败: ${error.message || '未知错误'}`);
-  } finally {
-    isSaving.value = false;
-    saveStateTimeout = setTimeout(() => {
-      saveState.value = 'idle';
-    }, success ? 1500 : 3000);
-  }
-};
 
 
 // --- ContextMenu 和快捷键相关 (部分保留，部分需要调整) ---

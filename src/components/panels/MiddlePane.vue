@@ -142,72 +142,19 @@
 
           <!-- 列表视图 -->
           <div v-else class="p-3">
-            <div
-              v-for="item in filteredItems"
-              :key="item.id"
-              :class="[
-                'group cursor-pointer border-l-2 rounded-md mb-2.5 transition-all bg-card shadow-xs border border-border/30',
-                selectedItemId === item.id
-                  ? 'border-l-primary shadow-sm bg-accent/10 border-primary/20'
-                  : 'border-l-transparent hover:border-l-primary/40 hover:shadow-sm hover:bg-accent/5 hover:border-border/60'
-              ]"
-              @click="selectItem(item.id, item.type)"
-            >
-              <div class="py-2.5 px-3">
-                <div class="flex items-center gap-2">
-                  <!-- 触发词和标签 -->
-                  <div class="flex-1 min-w-0">
-                    <div v-if="item.type === 'match'" class="flex flex-col gap-1">
-                      <!-- 触发词和标签 -->
-                      <div class="flex items-center gap-2 flex-wrap">
-                        <h3 class="text-sm font-medium" :class="selectedItemId === item.id ? 'text-primary' : 'text-foreground'">
-                          <HighlightText
-                            v-if="searchQuery.trim()"
-                            :text="(item as Match).trigger || ''"
-                            :searchQuery="searchQuery.trim()"
-                          />
-                          <template v-else>{{ (item as Match).trigger }}</template>
-                        </h3>
-
-                        <div
-                          v-if="(item as Match).label"
-                          class="text-xs px-1.5 rounded truncate max-w-[120px]"
-                          :class="selectedItemId === item.id
-                            ? 'bg-primary/10 text-primary'
-                            : 'bg-muted text-muted-foreground'"
-                        >
-                          {{ (item as Match).label }}
-                        </div>
-                      </div>
-
-                      <!-- 简短描述或内容预览 -->
-                      <div
-                        class="text-xs"
-                        :class="selectedItemId === item.id ? 'text-foreground/90' : 'text-muted-foreground'"
-                      >
-                        {{ (item as Match).description || getContentPreview(item as Match) }}
-                      </div>
-                    </div>
-                  </div>
-
-                  <!-- 右侧标签 -->
-                  <div
-                    class="flex gap-1 flex-wrap justify-end flex-shrink-0"
-                    v-if="(item as Match).tags && ((item as Match)?.tags?.length||0) > 0"
-                  >
-                    <Badge
-                      v-for="tag in (item as Match).tags"
-                      :key="tag"
-                      variant="outline"
-                      class="text-xs border-0 bg-muted/50 px-1.5 py-0 whitespace-nowrap"
-                      @click.stop="addTagFilter(tag)"
-                    >
-                      {{ tag }}
-                    </Badge>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <template v-for="item in filteredItems" :key="item.id">
+              <SnippetListItem
+                v-if="item.type === 'match'"
+                :trigger="(item as Match).trigger || ''"
+                :label="(item as Match).label"
+                :secondary="(item as Match).description || getContentPreview(item as Match)"
+                :tags="(item as Match).tags"
+                :selected="selectedItemId === item.id"
+                :search-query="searchQuery.trim()"
+                @select="selectItem(item.id, item.type)"
+                @tag-click="addTagFilter"
+              />
+            </template>
           </div>
         </div>
       </div>
@@ -223,7 +170,8 @@ import { Input } from "../ui/input";
 import { Badge } from "../ui/badge";
 
 import ConfigTree from "@/components/ConfigTree.vue";
-import HighlightText from "@/components/common/HighlightText.vue";
+import SnippetListItem from "@/components/common/SnippetListItem.vue";
+import { getContentPreview } from "@/utils/snippetPreview";
 import RootContextMenu from "@/components/RootContextMenu.vue";
 import {
   SearchIcon,
@@ -495,65 +443,16 @@ const filteredItems = computed(() => {
   return finalItems;
 });
 
-// 内容预览
-const getContentPreview = (item: Match) => {
-  if (!item || item.type !== "match") {
-    return "";
-  }
-
-  if (!item.replace) {
-    return "";
-  }
-
-  const text =
-    typeof item.replace === "string"
-      ? item.replace
-      : JSON.stringify(item.replace);
-
-  return text.length > 100 ? text.substring(0, 100) + "..." : text;
-};
+// 内容预览（与「应用专用片段」列表共用同一实现）
 
 // 获取内容类型标签
-const getContentTypeLabel = (contentType?: string) => {
-  if (!contentType) return "纯文本";
 
-  const typeMap: Record<string, string> = {
-    text: "纯文本",
-    html: "HTML",
-    image: "图片",
-    script: "脚本",
-    keystroke: "按键",
-    form: "表单",
-  };
-
-  return typeMap[contentType] || contentType;
-};
 
 // 格式化日期
-const formatDate = (dateString: string) => {
-  const date = new Date(dateString);
-  return date.toLocaleDateString("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-};
+
 
 // 获取简化的文件路径显示
-const getFilePathDisplay = (filePath?: string) => {
-  if (!filePath) return '';
 
-  // 从路径中提取文件名
-  const parts = filePath.split('/');
-  const fileName = parts[parts.length - 1];
-
-  // 如果路径很长，显示简化版本
-  if (parts.length > 2) {
-    return `${parts[0]}/.../${fileName}`;
-  }
-
-  return filePath;
-};
 
 // 选择项目 (列表视图点击)
 const selectItem = (id: string, type: EspansoState["selectedItemType"]) => {

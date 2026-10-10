@@ -56,7 +56,8 @@ import { Input } from '../ui/input';
 import { Textarea } from '../ui/textarea';
 import FormSection from '../common/FormSection.vue';
 import HelpTip from '../common/HelpTip.vue';
-import type { Group } from '../../types/espanso';
+import type { BaseItem } from '@/types/core/espanso.types';
+interface Group extends BaseItem { type: 'group'; name: string; label?: string; prefix?: string }
 
 // 获取 store
 const store = useEspansoStore();
@@ -158,19 +159,7 @@ const onSubmit = () => {
 };
 
 // 取消编辑
-const onCancel = () => {
-  // 如果表单已修改，提示用户
-  if (isFormModified.value) {
-    if (confirm('您有未保存的修改，确定要放弃这些修改吗？')) {
-      // 重置表单状态
-      isFormModified.value = false;
-      store.state.hasUnsavedChanges = false;
-      emit('cancel');
-    }
-  } else {
-    emit('cancel');
-  }
-};
+
 
 // 组件卸载前检查未保存的修改
 onBeforeUnmount(() => {

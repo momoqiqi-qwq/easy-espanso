@@ -2,8 +2,8 @@ import { createRouter, createWebHashHistory, type RouteRecordRaw } from 'vue-rou
 import i18n from '../i18n';
 
 const SnippetsView = () => import('../views/SnippetsView.vue');
-import SettingsView from '../views/SettingsView.vue';
-import AppProfilesView from '../views/AppProfilesView.vue';
+const SettingsView = () => import('../views/SettingsView.vue');
+const AppProfilesView = () => import('../views/AppProfilesView.vue');
 const NotFoundView = () => import('../views/NotFoundView.vue');
 
 const routes: Array<RouteRecordRaw> = [

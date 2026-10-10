@@ -135,16 +135,19 @@
           </select>
         </label>
         <label v-if="newConfig.filterType === 'filter_exec'">拖放准星选取程序
-          <div class="app-picker-row">
+          <div class="app-picker-row" :class="{ 'is-picking': pickingApp }">
             <button
               type="button"
               class="target-picker"
-              draggable="true"
-              title="按住并拖到目标程序窗口上，松开后自动识别 EXE"
-              @dragstart="startAppPicker"
-              @dragend="finishAppPicker(newConfig)"
+              :class="{ active: pickingApp }"
+              title="按住准星拖到目标程序窗口上：拖动过程中持续识别，松开鼠标才确认"
+              @pointerdown.prevent="startAppPicker($event, newConfig)"
+              @pointerup.prevent="finishAppPicker()"
+              @pointercancel.prevent="cancelAppPicker()"
             ><Crosshair class="w-5 h-5" /></button>
-            <span>将准星拖到目标软件窗口上方后松开</span>
+            <span v-if="pickingApp && liveTarget" class="picker-live">正在识别：<strong>{{ liveTarget.name }}</strong>（松开鼠标确认，Esc 取消）</span>
+            <span v-else-if="pickingApp">按住鼠标，拖到目标软件窗口上方…</span>
+            <span v-else>将准星拖到目标软件窗口上方后松开</span>
           </div>
         </label>
         <label>匹配值<input v-model="newConfig.filterValue" :placeholder="filterValuePlaceholder" /></label>
@@ -170,41 +173,55 @@
       </div>
     </div>
 
-    <div v-if="editing" class="overlay" @click.self="editing = null">
+    <div v-if="editing" class="overlay" @click.self="closeEditing">
       <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="app-profile-dialog-title">
         <div class="dialog-heading">
           <div>
             <h2 id="app-profile-dialog-title">编辑应用规则</h2>
-            <p>{{ editing.fileName }}</p>
+            <p class="dialog-subtitle">
+              {{ editing.fileName }}
+              <span v-if="autoSaveLabel" class="autosave-state" :class="autoSaveStatus">{{ autoSaveLabel }}</span>
+            </p>
           </div>
-          <button type="button" class="close-button" @click="editing = null" aria-label="关闭"><X class="w-4 h-4" /></button>
+          <button type="button" class="close-button" @click="closeEditing" aria-label="关闭"><X class="w-4 h-4" /></button>
         </div>
         <label>过滤类型
-          <select v-model="editing.filterType">
+          <select v-model="editing.filterType" @change="scheduleAutoSave">
             <option value="filter_exec">可执行文件</option>
             <option value="filter_class">窗口类 / App ID</option>
             <option value="filter_title">窗口标题</option>
           </select>
         </label>
         <label v-if="editing.filterType === 'filter_exec'">拖放准星选取程序
-          <div class="app-picker-row">
-            <button type="button" class="target-picker" draggable="true" title="按住并拖到目标程序窗口上，松开后自动识别 EXE" @dragstart="startAppPicker" @dragend="finishAppPicker(editing)"><Crosshair class="w-5 h-5" /></button>
-            <span>将准星拖到目标软件窗口上方后松开</span>
+          <div class="app-picker-row" :class="{ 'is-picking': pickingApp }">
+            <button
+              type="button"
+              class="target-picker"
+              :class="{ active: pickingApp }"
+              title="按住准星拖到目标程序窗口上：拖动过程中持续识别，松开鼠标才确认"
+              @pointerdown.prevent="startAppPicker($event, editing)"
+              @pointerup.prevent="finishAppPicker()"
+              @pointercancel.prevent="cancelAppPicker()"
+            ><Crosshair class="w-5 h-5" /></button>
+            <span v-if="pickingApp && liveTarget" class="picker-live">正在识别：<strong>{{ liveTarget.name }}</strong>（松开鼠标确认，Esc 取消）</span>
+            <span v-else-if="pickingApp">按住鼠标，拖到目标软件窗口上方…</span>
+            <span v-else>将准星拖到目标软件窗口上方后松开</span>
           </div>
         </label>
-        <label>匹配值<input v-model="editing.filterValue" :placeholder="filterValuePlaceholder" /></label>
-        <AppOnlySnippetsEditor v-model="editingSnippets" />
+        <label>匹配值<input v-model="editing.filterValue" :placeholder="filterValuePlaceholder" @blur="scheduleAutoSave" @keydown.enter.prevent="scheduleAutoSave" /></label>
+        <AppOnlySnippetsEditor v-model="editingSnippets" @update:model-value="scheduleAutoSave" />
         <label>后端
-          <select v-model="editing.backend">
+          <select v-model="editing.backend" @change="scheduleAutoSave">
             <option :value="undefined">继承</option>
             <option value="auto">auto</option>
             <option value="inject">inject</option>
             <option value="clipboard">clipboard</option>
           </select>
         </label>
-        <label class="check"><input type="checkbox" v-model="editing.enable" /> 在匹配应用中启用 Espanso</label>
+        <label class="check"><input type="checkbox" v-model="editing.enable" @change="scheduleAutoSave" /> 在匹配应用中启用 Espanso</label>
         <div class="footer">
-          <Button variant="outline" @click="editing = null">取消</Button>
+          <span class="autosave-note">{{ userPreferences.preferences.autoSave ? '改动会自动保存' : '自动保存已关闭，关闭弹窗前会保存一次' }}</span>
+          <Button variant="outline" @click="closeEditing">关闭</Button>
           <Button @click="saveEdit" :disabled="savingEdit">{{ savingEdit ? '保存中…' : '保存' }}</Button>
         </div>
       </div>
@@ -215,7 +232,7 @@
 <script setup lang="ts">
 import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from '@/components/ui/context-menu';
 import { useUserPreferences } from '@/store/useUserPreferences';
-import { computed, onMounted, ref, toRaw, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, toRaw, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { toast } from 'vue-sonner';
@@ -241,13 +258,15 @@ import { useEspansoStore } from '@/store/useEspansoStore';
 import { useAppProfilesStore, type AppProfile } from '@/store/useAppProfilesStore';
 import * as appSpecificConfigService from '@/services/appSpecificConfigService';
 import type { Match } from '@/types/core/espanso.types';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, isTauri } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
 const router = useRouter();
 const route = useRoute();
 const { t } = useI18n();
 const store = useEspansoStore();
 const apps = useAppProfilesStore();
+const userPreferences = useUserPreferences();
 
 // ==================== 页面分类（/web 网页、/folders 文件夹、/apps 全部） ====================
 type ProfileCategory = 'web' | 'folder';
@@ -303,37 +322,115 @@ const profileSnippets = ref<Record<string, Match[]>>({});
 
 type EditableAppConfig = appSpecificConfigService.AppSpecificConfig | AppProfile;
 const pickingApp = ref(false);
+// 本次拾取要写入的目标（新建配置 / 正在编辑的规则）
+const pickingTarget = ref<EditableAppConfig | null>(null);
+// 按住鼠标期间实时识别到的程序，仅用于界面预览
+const liveTarget = ref<{ path: string; name: string } | null>(null);
+let unlistenCursorTarget: UnlistenFn | null = null;
+let unlistenCursorEnd: UnlistenFn | null = null;
 
-function startAppPicker(event: DragEvent) {
+// 只注册一次监听：cursor-target 负责实时预览，cursor-target-end 由后端在“左键松手”时发出
+async function ensureCursorListeners() {
+  if (unlistenCursorTarget) return;
+  unlistenCursorTarget = await listen<string | null>('cursor-target', (event) => {
+    const path = event.payload;
+    liveTarget.value = path ? { path, name: path.split(/[\\/]/).pop() || path } : null;
+  });
+  unlistenCursorEnd = await listen('cursor-target-end', () => {
+    void finishAppPicker();
+  });
+}
+
+// 按住准星：开始持续探测，直到松开鼠标才停止
+async function startAppPicker(event: PointerEvent, target: EditableAppConfig) {
+  if (pickingApp.value) return;
   pickingApp.value = true;
-  if (event.dataTransfer) {
-    event.dataTransfer.effectAllowed = 'copy';
-    event.dataTransfer.setData('text/plain', 'Easy Espanso target picker');
+  pickingTarget.value = target;
+  liveTarget.value = null;
+  try {
+    (event.currentTarget as HTMLElement | null)?.setPointerCapture?.(event.pointerId);
+  } catch {
+    // 指针捕获失败不影响功能：结束信号以后端检测到的"左键松开"为准
+  }
+  if (!isTauri()) return;
+  try {
+    await ensureCursorListeners();
+    await invoke('start_cursor_probe');
+  } catch {
+    // 实时探测不可用时静默降级：松开鼠标后仍会识别一次
   }
 }
 
-async function finishAppPicker(target: EditableAppConfig) {
-  if (!pickingApp.value) return;
+async function stopCursorProbe() {
+  if (!isTauri()) return;
+  try {
+    await invoke('stop_cursor_probe');
+  } catch {
+    // 忽略：探测线程可能已经自行退出
+  }
+}
+
+function resetPicker() {
   pickingApp.value = false;
+  pickingTarget.value = null;
+  liveTarget.value = null;
+}
+
+function applyPickedExecutable(target: EditableAppConfig, executablePath: string) {
+  const executable = executablePath.split(/[\\/]/).pop() || executablePath;
+  target.filterType = 'filter_exec';
+  target.filterValue = executable;
+  if (!target.fileName || target.fileName === 'app') {
+    target.fileName = executable.replace(/\.exe$/i, '').replace(/[^a-zA-Z0-9_-]/g, '_') || 'app';
+  }
+  toast.success(`已识别程序：${executable}`);
+  // 准星识别到的完整路径只存在于此刻，立即用它在后端提取图标并按 exe 名缓存，
+  // 之后列表按文件名查找直接命中（下载目录等 PATH 外的程序也能显示图标）
+  invoke<string>('get_app_icon_base64', { executable: executablePath })
+    .then((url) => {
+      if (url && url.startsWith('data:image')) {
+        iconUrls.value[executable.toLowerCase()] = url;
+        failedIcons.delete(executable.toLowerCase());
+      }
+    })
+    .catch(() => {});
+}
+
+// 松开鼠标（或后端探测到左键已松开）时收尾：以最终位置再读一次，读不到则回退到实时预览结果
+async function finishAppPicker() {
+  if (!pickingApp.value) return;
+  const target = pickingTarget.value;
+  const preview = liveTarget.value;
+  resetPicker();
+  void stopCursorProbe();
+  if (!target) return;
+  // 拾取前先记录它是不是正在编辑的规则：拾取完成后要立刻落盘
+  const shouldAutoSave = target === editing.value;
   try {
     const executablePath = await invoke<string>('get_executable_under_cursor');
-    const executable = executablePath.split(/[\\/]/).pop() || executablePath;
-    target.filterType = 'filter_exec';
-    target.filterValue = executable;
-    if (!target.fileName || target.fileName === 'app') target.fileName = executable.replace(/\.exe$/i, '').replace(/[^a-zA-Z0-9_-]/g, '_') || 'app';
-    toast.success(`已识别程序：${executable}`);
-    // 准星识别到的完整路径只存在于此刻，立即用它在后端提取图标并按 exe 名缓存，
-    // 之后列表按文件名查找直接命中（下载目录等 PATH 外的程序也能显示图标）
-    invoke<string>('get_app_icon_base64', { executable: executablePath })
-      .then((url) => {
-        if (url && url.startsWith('data:image')) {
-          iconUrls.value[executable.toLowerCase()] = url;
-          failedIcons.delete(executable.toLowerCase());
-        }
-      })
-      .catch(() => {});
+    applyPickedExecutable(target, executablePath);
   } catch (error: any) {
-    toast.error(error?.message ?? String(error));
+    if (preview) {
+      applyPickedExecutable(target, preview.path);
+    } else {
+      toast.error(error?.message ?? String(error));
+      return;
+    }
+  }
+  if (shouldAutoSave && target === editing.value) scheduleAutoSave();
+}
+
+// Esc 取消本次拾取（不写入任何值）
+async function cancelAppPicker() {
+  if (!pickingApp.value) return;
+  resetPicker();
+  await stopCursorProbe();
+}
+
+function onPickerKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && pickingApp.value) {
+    event.preventDefault();
+    void cancelAppPicker();
   }
 }
 
@@ -396,8 +493,23 @@ const reload = async () => {
 onMounted(reload);
 watch(() => store.state.configRootDir, reload);
 
+// 拾取期间监听 Esc 取消；组件卸载时清掉监听并确保探测线程停下
+onMounted(() => window.addEventListener('keydown', onPickerKeydown, true));
+onUnmounted(() => {
+  window.removeEventListener('keydown', onPickerKeydown, true);
+  unlistenCursorTarget?.();
+  unlistenCursorTarget = null;
+  unlistenCursorEnd?.();
+  unlistenCursorEnd = null;
+  clearAutoSaveTimer();
+  clearAutoSaveHint();
+  void stopCursorProbe();
+});
+
 const label = (value: string) => value === 'filter_exec' ? '程序' : value === 'filter_class' ? '窗口类' : '标题';
 const goCreate = () => {
+  clearAutoSaveTimer();
+  clearAutoSaveHint();
   creatingSnippets.value = [];
   creating.value = true;
   // 按分类页预填过滤类型与匹配值
@@ -416,10 +528,13 @@ const filterValuePlaceholder = computed(() => {
   return '例如 Code.exe、Telegram、YouTube';
 });
 
-// 切换分类页时收起弹窗，避免跨页残留
-watch(category, () => {
+// 切换分类页时收起弹窗，避免跨页残留（收起前把未保存的改动落盘）
+watch(category, async () => {
+  await flushAutoSave();
   creating.value = false;
   editing.value = null;
+  clearAutoSaveTimer();
+  clearAutoSaveHint();
 });
 
 const cloneProfile = (profile: AppProfile): AppProfile => {
@@ -432,6 +547,8 @@ const cloneProfile = (profile: AppProfile): AppProfile => {
   };
 };
 const edit = async (profile: AppProfile) => {
+  clearAutoSaveTimer();
+  clearAutoSaveHint();
   editing.value = cloneProfile(profile);
   editingSnippets.value = [];
   if (!store.state.configRootDir) {
@@ -479,25 +596,135 @@ async function saveCreate() {
   }
 }
 
+// ==================== 编辑弹窗实时保存（对齐片段管理） ====================
+// 片段管理（RuleEditForm）在字段失焦 / 控件变更时自动落盘，这里复用同一套语义：
+// 受「自动保存」偏好控制，关闭弹窗前无条件冲刷一次，保证不会静默丢改动。
+const AUTO_SAVE_DELAY = 700;
+let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
+let autoSaveHintTimer: ReturnType<typeof setTimeout> | null = null;
+const autoSaveStatus = ref<'idle' | 'saving' | 'saved' | 'error'>('idle');
+const autoSaveLabel = computed(() => {
+  if (autoSaveStatus.value === 'saving') return '保存中…';
+  if (autoSaveStatus.value === 'saved') return '已保存';
+  if (autoSaveStatus.value === 'error') return '保存失败';
+  return '';
+});
+
+function clearAutoSaveTimer() {
+  if (autoSaveTimer) {
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = null;
+  }
+}
+
+function clearAutoSaveHint() {
+  if (autoSaveHintTimer) {
+    clearTimeout(autoSaveHintTimer);
+    autoSaveHintTimer = null;
+  }
+  autoSaveStatus.value = 'idle';
+}
+
+/** 只刷新某条规则的「仅此应用」片段预览（apps.save 已重新加载过 profiles 列表） */
+async function refreshProfileSnippets(profile: AppProfile) {
+  const root = store.state.configRootDir;
+  if (!root) return;
+  try {
+    const snippets = await appSpecificConfigService.loadAppOnlySnippets(root, profile);
+    profileSnippets.value = { ...profileSnippets.value, [profile.path]: snippets };
+  } catch (error) {
+    console.warn('刷新应用专用片段预览失败:', profile.path, error);
+  }
+}
+
+/**
+ * 把当前编辑中的规则落盘。返回是否成功。
+ * @param options.toast true 表示用户显式点击「保存」，失败/成功都给反馈；否则是静默自动保存。
+ */
+async function persistEditing(options: { toast?: boolean } = {}): Promise<boolean> {
+  const profile = editing.value;
+  const root = store.state.configRootDir;
+  if (!profile || !root || savingEdit.value) return false;
+  if (!profile.filterValue.trim()) {
+    if (options.toast) toast.error('匹配值不能为空');
+    return false;
+  }
+  if (!options.toast) {
+    clearAutoSaveHint();
+    autoSaveStatus.value = 'saving';
+  }
+  savingEdit.value = true;
+  try {
+    const item = appSpecificConfigService.withAppOnlyMatchReference(profile);
+    await appSpecificConfigService.saveAppOnlySnippets(root, item, editingSnippets.value);
+    await apps.save(item);
+    await refreshProfileSnippets(profile);
+    if (options.toast) {
+      clearAutoSaveHint();
+      toast.success('应用配置已保存');
+    } else {
+      // 先清掉上一轮的提示计时器，再置为「已保存」，否则会被 clearAutoSaveHint 立刻重置为 idle
+      clearAutoSaveHint();
+      autoSaveStatus.value = 'saved';
+      autoSaveHintTimer = setTimeout(() => { autoSaveStatus.value = 'idle'; autoSaveHintTimer = null; }, 1500);
+    }
+    return true;
+  } catch (error: any) {
+    autoSaveStatus.value = 'error';
+    toast.error(`保存失败：${error?.message ?? String(error)}`);
+    return false;
+  } finally {
+    savingEdit.value = false;
+  }
+}
+
+/** 字段变更后的防抖自动保存；用户关闭「自动保存」偏好时跳过隐式保存 */
+function scheduleAutoSave() {
+  if (!editing.value) return;
+  if (!userPreferences.preferences.autoSave) return;
+  clearAutoSaveTimer();
+  autoSaveTimer = setTimeout(() => {
+    autoSaveTimer = null;
+    void persistEditing();
+  }, AUTO_SAVE_DELAY);
+}
+
+/** 立刻冲刷挂起的自动保存（关闭弹窗 / 分类页切换前调用） */
+async function flushAutoSave() {
+  if (!editing.value) return;
+  const hasPending = autoSaveTimer !== null;
+  clearAutoSaveTimer();
+  if (!hasPending) return;
+  await persistEditing();
+}
+
+/** 关闭编辑弹窗：先把未落盘的改动写下去，再收起 */
+async function closeEditing() {
+  if (pickingApp.value) await cancelAppPicker();
+  const hadPending = autoSaveTimer !== null;
+  await flushAutoSave();
+  // 匹配值为空时不写盘（避免落一条废规则），但要让用户知道改动没保存
+  if (hadPending && editing.value && !editing.value.filterValue.trim()) {
+    toast.error('匹配值为空，改动未保存');
+  }
+  clearAutoSaveTimer();
+  clearAutoSaveHint();
+  editing.value = null;
+  editingSnippets.value = [];
+}
+
 async function saveEdit() {
   if (!editing.value || savingEdit.value) return;
+  clearAutoSaveTimer();
   if (!editing.value.filterValue.trim()) {
     toast.error('匹配值不能为空');
     return;
   }
-  savingEdit.value = true;
-  try {
-    const item = appSpecificConfigService.withAppOnlyMatchReference(editing.value);
-    await appSpecificConfigService.saveAppOnlySnippets(store.state.configRootDir!, item, editingSnippets.value);
-    await apps.save(item);
+  const ok = await persistEditing({ toast: true });
+  if (ok) {
+    clearAutoSaveHint();
     editing.value = null;
     editingSnippets.value = [];
-    await reload();
-    toast.success('应用配置已保存');
-  } catch (error: any) {
-    toast.error(`保存失败：${error?.message ?? String(error)}`);
-  } finally {
-    savingEdit.value = false;
   }
 }
 
@@ -648,13 +875,21 @@ p, small { color: hsl(var(--muted-foreground)); }
 .dialog { width: min(920px, 96vw); max-height: 92vh; overflow-y: auto; background: hsl(var(--background)); border: 1px solid hsl(var(--border)); box-shadow: 0 24px 80px rgb(0 0 0 / .28); padding: 22px; border-radius: 14px; display: grid; gap: 14px; }
 .dialog-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .dialog h2 { font-size: 20px; font-weight: 650; }
+.dialog-subtitle { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.autosave-state { font-size: 12px; padding: 1px 7px; border-radius: 9999px; background: hsl(var(--muted)); color: hsl(var(--muted-foreground)); }
+.autosave-state.saved { background: hsl(142 71% 45% / 0.16); color: hsl(142 60% 30%); }
+.autosave-state.error { background: hsl(var(--destructive) / 0.14); color: hsl(var(--destructive)); }
 .dialog label { display: grid; gap: 6px; font-size: 13px; font-weight: 500; }
 .dialog input, .dialog select { border: 1px solid hsl(var(--border)); border-radius: 8px; padding: 9px; background: hsl(var(--background)); color: hsl(var(--foreground)); }
 .dialog .check { display: flex; align-items: center; font-weight: 400; }
 .dialog .check input { width: auto; }
 .app-picker-row { display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 8px 10px; border: 1px solid hsl(var(--border)); border-radius: 8px; background: hsl(var(--muted) / .35); color: hsl(var(--muted-foreground)); font-weight: 400; }
+.app-picker-row.is-picking { border-color: hsl(var(--primary)); background: hsl(var(--primary) / .07); color: hsl(var(--foreground)); }
 .target-picker { width: 34px; height: 34px; display: inline-grid; place-items: center; flex: 0 0 auto; border: 1px solid hsl(var(--border)); border-radius: 7px; background: hsl(var(--background)); color: hsl(var(--primary)); cursor: crosshair; }
 .target-picker:active { transform: scale(.96); }
+.target-picker.active { border-color: hsl(var(--primary)); box-shadow: 0 0 0 3px hsl(var(--primary) / .18); }
+.picker-live { color: hsl(var(--primary)); font-weight: 500; }
+.picker-live strong { font-weight: 650; }
 .match-file-box { border: 1px solid hsl(var(--border)); border-radius: 10px; padding: 10px 12px 12px; display: grid; gap: 8px; }
 .match-file-box legend { padding: 0 5px; font-size: 13px; font-weight: 600; }
 .match-file-box p { font-size: 12px; margin: 0; }
@@ -672,7 +907,8 @@ p, small { color: hsl(var(--muted-foreground)); }
 .close-button { width: 32px; height: 32px; padding: 0; color: hsl(var(--muted-foreground)); }
 .close-button:hover { background: hsl(var(--accent)); color: hsl(var(--foreground)); }
 .dialog-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.footer { display: flex; justify-content: flex-end; gap: 8px; }
+.footer { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.autosave-note { margin-right: auto; font-size: 12px; color: hsl(var(--muted-foreground)); }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 880px) {

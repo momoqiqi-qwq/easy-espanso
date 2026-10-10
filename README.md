@@ -47,6 +47,17 @@ Windows 使用 `x64-setup.exe` 安装包。构建流程也包含 macOS 和 Linux
 
 图片类型需要管理对应图片文件的路径。配置编辑与 Espanso 运行分开：进入仅编辑模式仍可修改配置，实际触发替换需要 Espanso 正常运行。
 
+### 快捷编辑多选方案
+
+同一个触发词可以对应多个片段，让 Espanso 显示候选内容。选中片段后，点击右侧的 **编辑方案**，即可集中编辑当前文件中使用相同触发词的候选方案。
+
+- **新增方案 / 复制方案**：创建空白文本方案，或复制当前方案及其变量、匹配设置。
+- **调整顺序 / 删除方案**：管理候选列表；至少保留一个方案。
+- **批量添加**：每行一个替换内容；粘贴表格的两列时，分别作为名称和内容。
+- **共用触发词**：一次修改整组触发词，点击 **保存全部方案** 后一起写入，可作为一次操作撤销。
+
+方案弹窗内支持 `Alt + 1…9` 切换、`Ctrl/⌘ + D` 复制和 `Ctrl/⌘ + S` 保存。取消时不写入配置；保存失败会保留弹窗中的草稿。
+
 ### 常用快捷键
 
 | 快捷键 | 操作 |
@@ -102,10 +113,15 @@ npm run tauri:build -- --bundles nsis
 ### 验证命令
 
 ```bash
+npm run typecheck
+npm test
 npm run build
 cargo check --manifest-path src-tauri/Cargo.toml
+cargo test --manifest-path src-tauri/Cargo.toml --lib atomic_write_tests
 node scripts/test-updates.mjs
 ```
+
+`npm run build` 会先运行严格的 Vue/TypeScript 检查。`npm test` 在内存文件系统中验证配置保存、失败回滚和多选编辑，并运行离线更新辅助函数检查，不访问用户的 Espanso 配置。
 
 ### 发布版本
 

@@ -1,12 +1,11 @@
 import * as platformService from './platformService'; // 用于文件系统操作
 import * as yamlService from './yamlService';         // 用于 YAML 解析/序列化
-import * as configService from './configService';
 import * as workspaceService from './workspaceService';     // 用于获取配置路径等
 
 // 核心类型 (假设已移至 types/core/)
 import type { Match } from '@/types/core/espanso.types';
 import type { GlobalConfig, EspansoMatchYaml } from '@/types/core/espanso-format.types';
-import type { ConfigTreeNode, ConfigFileNode } from '@/types/core/ui.types';
+import type { ConfigTreeNode } from '@/types/core/ui.types';
 import type { YamlData, FileSystemNode } from '@/types/core/preload.types';
 
 // 工具函数 (假设已重构)
@@ -236,188 +235,65 @@ export const loadConfiguration = async (configDir: string): Promise<{
  * @param existingYamlData 可选的，该文件原始解析的 YAML 数据，用于保留未被管理的顶层键。
  * @throws 如果序列化或写入文件失败，则抛出错误。
  */
-export const saveConfigurationFile = async (
-    filePath: string,
-    itemsToSave: (Match)[],
-    existingYamlData: YamlData = {} // 提供一个默认空对象
-): Promise<void> => {
-    console.log(`[EspansoService] 准备保存文件: ${filePath}`);
+export interface ConfigurationWrite {
+    filePath: string;
+    itemsToSave: Match[];
+    existingYamlData?: YamlData;
+}
 
-    const saveData: YamlData = {};
+let saveQueue: Promise<void> = Promise.resolve();
 
-    // 1. 保留原始 YAML 中非 matches 的顶层键
-    for (const key in existingYamlData) {
-        if (key !== 'matches') {
-            saveData[key] = existingYamlData[key];
+/** Prepare every file before writing, and restore completed writes if a later write fails. */
+export function saveConfigurationFiles(files: ConfigurationWrite[]): Promise<void> {
+    // Capture the caller's data now, before another edit can mutate reactive state.
+    const prepared = files.map(file => {
+        const data: YamlData = Object.fromEntries(Object.entries(file.existingYamlData || {}).filter(([key]) => key !== 'matches'));
+        data.matches = file.itemsToSave.map(item => {
+            if (item.filePath !== file.filePath) throw new Error(`Match ${item.id} belongs to another file`);
+            return cleanMatchForSaving(item);
+        });
+        return { filePath: file.filePath, yaml: yamlService.serializeYaml(data) };
+    });
+    // Attach handlers immediately so queued validation failures cannot become unhandled rejections.
+    const serialized = Promise.all(prepared.map(async file => ({ filePath: file.filePath, content: await file.yaml })));
+    void serialized.catch(() => {});
+    const save = saveQueue.then(async () => {
+        const writes = await serialized;
+        if (new Set(writes.map(file => file.filePath)).size !== writes.length) throw new Error('Duplicate configuration write');
+        const originals = new Map<string, string | null>();
+        for (const file of writes) {
+            await workspaceService.validateYamlText(file.content);
+            originals.set(file.filePath, await platformService.fileExists(file.filePath) ? await platformService.readFile(file.filePath) : null);
+            await workspaceService.backupFile(file.filePath);
         }
-    }
-
-    // 2. 分离并清理 Matches 
-    const matchesForFile: any[] = [];
-    const topLevelGroupsForFile: any[] = [];
-
-    for (const item of itemsToSave) {
-        // 确保只处理直接属于此文件的项 (理论上调用者应该保证)
-         if (item.filePath !== filePath) {
-            console.warn(`[EspansoService Save] Item ${item.id} in save list for ${filePath} has incorrect filePath: ${item.filePath}. Skipping.`);
-            continue;
-         }
-
-        if (item.type === 'match') {
-            matchesForFile.push(cleanMatchForSaving(item)); // 清理内部字段
-        } 
-    }
-
-    // 3. 添加清理后的数据到保存对象 (仅当有内容时)
-    if (matchesForFile.length > 0) {
-         // TODO: 按 guiOrder 排序?
-         // matchesForFile.sort((a, b) => (a.guiOrder ?? Infinity) - (b.guiOrder ?? Infinity));
-        saveData.matches = matchesForFile;
-    }
-    if (topLevelGroupsForFile.length > 0) {
-        // TODO: 按 guiOrder 排序?
-        // topLevelGroupsForFile.sort((a, b) => (a.guiOrder ?? Infinity) - (b.guiOrder ?? Infinity));
-        saveData.groups = topLevelGroupsForFile;
-    }
-
-    // 4. 序列化并写入文件
-    try {
-        console.log(`[EspansoService] 准备序列化数据，内容结构:`, 
-            Object.keys(saveData).length, 
-            '个顶层键',
-            saveData.matches?.length || 0, '个匹配项',
-        );
-        
-        // 安全检查和深度调试
-        let hasPotentialCircularRefs = false;
-        let circularPathInfo = '';
-        
-        // 用一个简单的循环引用检测机制检查
-        const checkCircular = (obj: any) => {
-            const seen = new WeakSet();
-            const detect = (val: any, path: string) => {
-                if (val === null || val === undefined || typeof val !== 'object') return false;
-                
-                if (seen.has(val)) {
-                    circularPathInfo = path;
-                    return true;
-                }
-                
-                seen.add(val);
-                
-                if (Array.isArray(val)) {
-                    for (let i = 0; i < val.length; i++) {
-                        if (detect(val[i], `${path}[${i}]`)) return true;
-                    }
-                } else {
-                    for (const key of Object.keys(val)) {
-                        if (detect(val[key], `${path}.${key}`)) return true;
-                    }
-                }
-                
-                return false;
-            };
-            
-            return detect(obj, 'root');
-        };
-        
-        // 检查匹配项和分组的结构
-        if (saveData.matches && saveData.matches.length > 0) {
-            try {
-                // 只序列化第一个匹配项作为示例
-                const sampleMatch = saveData.matches[0];
-                const matchJson = JSON.stringify(sampleMatch).slice(0, 150) + '...';
-                console.log(`[EspansoService] 匹配项示例:`, matchJson);
-                
-                // 检查循环引用
-                if (checkCircular(saveData.matches)) {
-                    hasPotentialCircularRefs = true;
-                    console.warn(`[EspansoService] 检测到匹配项可能存在循环引用: ${circularPathInfo}`);
-                }
-            } catch (error: any) {
-                console.warn('[EspansoService] 无法对匹配项进行JSON序列化:', error.message);
-                hasPotentialCircularRefs = true;
-            }
-        }
-        
-        // 如果检测到潜在循环引用，创建安全副本
-        let dataToSerialize = saveData;
-        if (hasPotentialCircularRefs) {
-            console.log('[EspansoService] 检测到潜在循环引用，创建数据安全副本');
-            // 创建一个简单的副本
-            dataToSerialize = JSON.parse(JSON.stringify({
-                matches: saveData.matches ? saveData.matches.map(m => ({...m})) : undefined,
-                // 复制其他顶层键
-                ...Object.fromEntries(
-                    Object.entries(saveData)
-                        .filter(([k]) => k !== 'matches')
-                )
-            }));
-        }
-        
-        // 序列化
-        console.log(`[EspansoService] 开始序列化YAML...`);
-        
-        // 序列化最终的 saveData 对象为 YAML 字符串
-        const yamlString = await yamlService.serializeYaml(dataToSerialize);
-        console.log(`[EspansoService] YAML 序列化完成，准备写入文件: ${filePath}`);
-
-        // 保存前先重新解析 YAML，并保留上一版备份，避免坏配置覆盖可用配置
-        await workspaceService.validateYamlText(yamlString);
-        await workspaceService.backupFile(filePath);
-        await platformService.writeFile(filePath, yamlString);
-        console.log(`[EspansoService] 文件保存成功: ${filePath}`);
-    } catch (err: any) {
-        console.error(`[EspansoService] 保存文件 ${filePath} 失败: ${err.message}`, err);
-        
-        // 尝试捕获更多错误信息
-        if (err.stack) {
-            console.error(`[EspansoService] 错误堆栈:`, err.stack);
-        }
-        
-        // 诊断信息
-        console.log(`[EspansoService] 诊断：尝试进行额外错误处理`);
-        
+        const completed: string[] = [];
         try {
-            // 尝试备用方法保存文件
-            console.log(`[EspansoService] 尝试备用保存方法...`);
-            
-            // 创建一个极简结构的数据对象
-            const fallbackData: YamlData = {};
-            
-            // 只保留最基本的匹配项字段
-            if (saveData.matches && saveData.matches.length > 0) {
-                fallbackData.matches = saveData.matches.map(match => {
-                    const basic: {
-                        trigger: string;
-                        replace: string;
-                        label?: string;
-                    } = {
-                        trigger: match.trigger || '',
-                        replace: match.replace || '',
-                    };
-                    if (match.label) basic['label'] = match.label;
-                    return basic;
-                });
+            for (const file of writes) {
+                await platformService.writeFile(file.filePath, file.content);
+                completed.push(file.filePath);
             }
-            
-            // 转换为YAML
-            const yamlString = await yamlService.serializeYaml(fallbackData);
-            
-            // 写入文件
-            console.log(`[EspansoService] 使用备用数据结构写入文件: ${filePath}`);
-            await platformService.writeFile(filePath, yamlString);
-            console.log(`[EspansoService] 文件保存成功 (备用方法): ${filePath}`);
-            
-            // 尽管我们成功保存了文件，但仍然抛出原始错误以通知用户有问题
-            throw new Error(`保存文件时遇到问题，已使用简化数据格式保存。原错误: ${err.message}`);
-        } catch (fallbackErr: any) {
-            // 如果备用方法也失败，继续抛出原始错误
-            console.error(`[EspansoService] 备用保存方法也失败:`, fallbackErr);
-            throw new Error(`Failed to save file ${filePath}: ${err.message}`);
+        } catch (cause) {
+            const failures: string[] = [];
+            for (const path of completed.reverse()) {
+                try {
+                    const original = originals.get(path);
+                    if (original == null) await platformService.deleteFile(path);
+                    else await platformService.writeFile(path, original);
+                } catch (error) {
+                    failures.push(`${path}: ${String(error)}`);
+                }
+            }
+            const message = cause instanceof Error ? cause.message : String(cause);
+            throw new Error(failures.length ? `${message}; rollback failed: ${failures.join('; ')}` : message);
         }
-    }
-};
+    });
+    saveQueue = save.catch(() => {});
+    return save;
+}
+
+export function saveConfigurationFile(filePath: string, itemsToSave: Match[], existingYamlData: YamlData = {}): Promise<void> {
+    return saveConfigurationFiles([{ filePath, itemsToSave, existingYamlData }]);
+}
 
 /**
  * 保存全局配置对象到其对应的文件路径。

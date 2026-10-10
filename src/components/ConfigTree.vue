@@ -281,7 +281,7 @@ const createNewSnippet = async () => {
 };
 
 // 默认收起所有节点
-const isOpen = ref(false);
+
 
 </script>
 

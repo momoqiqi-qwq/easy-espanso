@@ -12,63 +12,28 @@
 
     <div class="editor-body">
       <aside class="snippet-list">
-        <button
+        <SnippetListItem
           v-for="snippet in model"
           :key="snippet.id"
-          type="button"
-          class="snippet-row"
-          :class="{ active: snippet.id === selectedId }"
-          @click="selectedId = snippet.id"
-        >
-          <span class="snippet-trigger">{{ displayTrigger(snippet) }}</span>
-          <span class="snippet-label">{{ snippet.label || '未命名片段' }}</span>
-        </button>
+          :trigger="displayTrigger(snippet)"
+          :label="snippet.label"
+          :secondary="snippet.description || getContentPreview(snippet)"
+          :selected="snippet.id === selectedId"
+          @select="selectedId = snippet.id"
+        />
         <div v-if="!model.length" class="empty-list">还没有专用片段</div>
       </aside>
 
       <div class="snippet-form">
         <template v-if="selectedSnippet">
-          <div class="top-fields">
-            <label>
-              <span>触发词</span>
-              <input
-                :value="selectedSnippet.trigger || ''"
-                placeholder=":example"
-                spellcheck="false"
-                @input="updateFieldFromEvent('trigger', $event)"
-              />
-            </label>
-            <label>
-              <span>名称</span>
-              <input
-                :value="selectedSnippet.label || ''"
-                placeholder="片段名称"
-                @input="updateFieldFromEvent('label', $event)"
-              />
-            </label>
+          <!-- 直接复用「片段管理」的编辑界面，持久化交给 persistSnippet -->
+          <div class="snippet-editor-host">
+            <RuleEditForm
+              :key="selectedSnippet.id"
+              :rule="selectedSnippet"
+              :save-handler="persistSnippet"
+            />
           </div>
-
-          <div class="content-heading">
-            <span>替换内容</span>
-            <div class="content-tabs" role="tablist" aria-label="内容类型">
-              <button
-                v-for="option in contentTypes"
-                :key="option.value"
-                type="button"
-                :class="{ active: currentContentType === option.value }"
-                @click="setContentType(option.value)"
-              >{{ option.label }}</button>
-            </div>
-          </div>
-
-          <textarea
-            class="content-editor"
-            :value="currentContent"
-            :placeholder="contentPlaceholder"
-            spellcheck="false"
-            @input="setContentFromEvent"
-          ></textarea>
-
           <div class="editor-footer">
             <small>共 {{ model.length }} 个专用片段</small>
             <Button type="button" size="sm" variant="ghost" class="danger" @click="removeSelected">
@@ -91,27 +56,15 @@ import { computed, ref, watch } from 'vue';
 import { FileText, Plus, Trash2 } from 'lucide-vue-next';
 import { v4 as uuidv4 } from 'uuid';
 import { Button } from '@/components/ui/button';
-import type { ContentType, Match } from '@/types/core/espanso.types';
+import RuleEditForm from '@/components/forms/RuleEditForm.vue';
+import SnippetListItem from '@/components/common/SnippetListItem.vue';
+import { getContentPreview } from '@/utils/snippetPreview';
+import type { Match } from '@/types/core/espanso.types';
 
 const model = defineModel<Match[]>({ required: true });
 const selectedId = ref<string | null>(null);
 
-const contentTypes: Array<{ value: ContentType; label: string }> = [
-  { value: 'plain', label: '文本' },
-  { value: 'markdown', label: 'Markdown' },
-  { value: 'html', label: 'HTML' },
-  { value: 'image', label: '图片路径' },
-  { value: 'form', label: '表单' },
-];
-
 const selectedSnippet = computed(() => model.value.find((item) => item.id === selectedId.value) || null);
-const currentContentType = computed<ContentType>(() => selectedSnippet.value?.contentType || inferContentType(selectedSnippet.value));
-const currentContent = computed(() => readContent(selectedSnippet.value));
-const contentPlaceholder = computed(() => {
-  if (currentContentType.value === 'image') return '输入图片文件路径…';
-  if (currentContentType.value === 'form') return '输入 Espanso 表单定义…';
-  return '输入替换内容…';
-});
 
 watch(
   () => model.value.map((item) => item.id).join('|'),
@@ -127,63 +80,16 @@ watch(
   { immediate: true },
 );
 
-function inferContentType(snippet: Match | null): ContentType {
-  if (!snippet) return 'plain';
-  if (snippet.markdown !== undefined) return 'markdown';
-  if (snippet.html !== undefined) return 'html';
-  if (snippet.image_path !== undefined) return 'image';
-  if (snippet.form !== undefined) return 'form';
-  return 'plain';
-}
-
-function readContent(snippet: Match | null): string {
-  if (!snippet) return '';
-  if (typeof snippet.content === 'string') return snippet.content;
-  switch (snippet.contentType || inferContentType(snippet)) {
-    case 'markdown': return String(snippet.markdown ?? '');
-    case 'html': return String(snippet.html ?? '');
-    case 'image': return String(snippet.image_path ?? '');
-    case 'form': return typeof snippet.form === 'string' ? snippet.form : '';
-    default: return String(snippet.replace ?? '');
-  }
-}
-
-function replaceSelected(mutator: (snippet: Match) => Match) {
-  const id = selectedId.value;
-  if (!id) return;
-  model.value = model.value.map((item) => item.id === id ? mutator({ ...item }) : item);
-}
-
-function updateField(field: 'trigger' | 'label', value: string) {
-  replaceSelected((snippet) => field === 'trigger'
-    ? { ...snippet, trigger: value, triggers: undefined }
-    : { ...snippet, label: value });
-}
-
-function updateFieldFromEvent(field: 'trigger' | 'label', event: Event) {
-  updateField(field, (event.target as HTMLInputElement).value);
-}
-
-function setContent(value: string) {
-  replaceSelected((snippet) => {
-    const contentType = snippet.contentType || inferContentType(snippet);
-    const next: Match = { ...snippet, contentType, content: value };
-    if (contentType === 'plain') next.replace = value;
-    if (contentType === 'markdown') next.markdown = value;
-    if (contentType === 'html') next.html = value;
-    if (contentType === 'image') next.image_path = value;
-    if (contentType === 'form') next.form = value;
-    return next;
-  });
-}
-
-function setContentFromEvent(event: Event) {
-  setContent((event.target as HTMLTextAreaElement).value);
-}
-
-function setContentType(contentType: ContentType) {
-  const content = currentContent.value;
-  replaceSelected((snippet) => ({ ...snippet, contentType, content }));
+/**
+ * RuleEditForm 的持久化出口。宿主接管后它不再写全局片段树，
+ * 我们只把编辑结果合并回 v-model 里的这一条专用片段。
+ */
+async function persistSnippet(_id: string | number | undefined, data: Partial<Match>) {
+  const targetId = selectedId.value;
+  if (!targetId) return;
+  model.value = model.value.map((item) =>
+    item.id === targetId ? { ...item, ...data, id: targetId, type: item.type || 'match' } : item,
+  );
 }
 
 function addSnippet() {
@@ -235,27 +141,13 @@ function displayTrigger(snippet: Match): string {
 }
 .editor-heading h3 { margin: 0; font-size: 13px; font-weight: 650; }
 .editor-heading p { margin: 3px 0 0; font-size: 12px; color: hsl(var(--muted-foreground)); }
-.editor-body { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 350px; }
-.snippet-list { border-right: 1px solid hsl(var(--border)); padding: 8px; overflow: auto; max-height: 410px; background: hsl(var(--muted) / .16); }
-.snippet-row { width: 100%; text-align: left; display: grid; gap: 2px; padding: 9px 10px; border-radius: 7px; border: 1px solid transparent; }
-.snippet-row:hover { background: hsl(var(--accent)); }
-.snippet-row.active { border-color: hsl(var(--primary) / .28); background: hsl(var(--primary) / .09); }
-.snippet-trigger { font-size: 12px; font-weight: 650; color: hsl(var(--foreground)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.snippet-label { font-size: 11px; color: hsl(var(--muted-foreground)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.editor-body { display: grid; grid-template-columns: 240px minmax(0, 1fr); align-items: stretch; }
+.snippet-list { border-right: 1px solid hsl(var(--border)); padding: 12px; overflow: auto; max-height: 560px; background: hsl(var(--muted) / .16); }
 .empty-list { padding: 24px 8px; text-align: center; font-size: 12px; color: hsl(var(--muted-foreground)); }
-.snippet-form { min-width: 0; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
-.top-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.top-fields label { display: grid; gap: 6px; font-size: 12px; font-weight: 550; }
-.top-fields input { width: 100%; border: 1px solid hsl(var(--border)); border-radius: 8px; padding: 8px 9px; background: hsl(var(--background)); color: hsl(var(--foreground)); }
-.content-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 12px; font-weight: 550; }
-.content-tabs { display: flex; border: 1px solid hsl(var(--border)); border-radius: 7px; overflow: hidden; }
-.content-tabs button { padding: 5px 8px; font-size: 11px; color: hsl(var(--muted-foreground)); border-left: 1px solid hsl(var(--border)); }
-.content-tabs button:first-child { border-left: 0; }
-.content-tabs button:hover { background: hsl(var(--accent)); color: hsl(var(--foreground)); }
-.content-tabs button.active { background: hsl(var(--primary)); color: hsl(var(--primary-foreground)); }
-.content-editor { flex: 1; min-height: 210px; width: 100%; resize: vertical; border: 1px solid hsl(var(--border)); border-radius: 8px; padding: 10px; background: hsl(var(--background)); color: hsl(var(--foreground)); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; line-height: 1.55; }
-.content-editor:focus, .top-fields input:focus { outline: none; border-color: hsl(var(--primary)); box-shadow: 0 0 0 2px hsl(var(--primary) / .12); }
-.editor-footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.snippet-form { min-width: 0; height: 560px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+/* RuleEditForm 的底部工具栏是 absolute bottom-0，需要一个定位上下文把它收在编辑器内 */
+.snippet-editor-host { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.editor-footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex: 0 0 auto; }
 .editor-footer small { color: hsl(var(--muted-foreground)); }
 .danger { color: hsl(var(--destructive)); }
 .empty-editor { flex: 1; min-height: 300px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center; color: hsl(var(--muted-foreground)); }
@@ -264,8 +156,5 @@ function displayTrigger(snippet: Match): string {
 @media (max-width: 760px) {
   .editor-body { grid-template-columns: 1fr; }
   .snippet-list { border-right: 0; border-bottom: 1px solid hsl(var(--border)); max-height: 150px; }
-  .top-fields { grid-template-columns: 1fr; }
-  .content-heading { align-items: flex-start; flex-direction: column; }
-  .content-tabs { flex-wrap: wrap; }
 }
 </style>

@@ -44,7 +44,7 @@ export async function serializeYaml(data: YamlData): Promise<string> {
         const cleanData = removeCircularReferences(data);
         
         // 使用适配器序列化清理后的数据
-        const result = await adapter.serializeYaml(cleanData);
+        const result = await adapter.serializeYaml(cleanData as YamlData);
         return result;
     } catch (error) {
         console.error("[YamlService] 序列化 YAML 失败:", error);
@@ -52,90 +52,23 @@ export async function serializeYaml(data: YamlData): Promise<string> {
     }
 }
 
-/**
- * 移除对象中的循环引用和不可序列化的属性
- * @param obj 要处理的对象
- * @returns 处理后的新对象，不含循环引用
- */
-function removeCircularReferences(obj: any): any {
-    // 使用Map跟踪对象路径，帮助调试
-    const seen = new WeakMap();
-    const paths: string[] = [];
-    let currentPath = '';
-    
-    function deepClean(value: any, path: string): any {
-        // 处理基本类型
-        if (value === null || value === undefined) return value;
-        if (typeof value !== 'object') return value;
-        
-        // 更新当前路径
-        const fullPath = path ? path : 'root';
-        
-        // 处理数组
-        if (Array.isArray(value)) {
-            // 检查循环引用
-            if (seen.has(value)) {
-                const prevPath = seen.get(value);
-                console.warn(`[YamlService] 检测到数组循环引用: ${fullPath} -> ${prevPath}`);
-                return []; // 返回空数组
-            }
-            
-            // 记录当前对象路径
-            seen.set(value, fullPath);
-            
-            // 递归处理数组元素
-            return value.map((item, idx) => 
-                deepClean(item, `${fullPath}[${idx}]`)
-            ).filter(item => item !== undefined); // 过滤掉undefined
-        }
-        
-        // 处理对象
-        if (seen.has(value)) {
-            const prevPath = seen.get(value);
-            console.warn(`[YamlService] 检测到对象循环引用: ${fullPath} -> ${prevPath}`);
-            return {}; // 返回空对象
-        }
-        
-        // 记录当前对象路径
-        seen.set(value, fullPath);
-        
-        // 创建新对象，递归处理属性
-        const cleanObj: any = {};
-        
+/** Shared YAML aliases are valid; only references to an ancestor are cycles. */
+function removeCircularReferences(obj: unknown): unknown {
+    const ancestors = new WeakSet<object>();
+    function clean(value: unknown, path: string): unknown {
+        if (value === null || typeof value !== 'object') return value;
+        if (ancestors.has(value)) throw new Error(`Circular YAML reference at ${path}`);
+        // Keep scalars such as YAML timestamps intact.
+        if (value instanceof Date) return new Date(value.getTime());
+        ancestors.add(value);
         try {
-            // 使用 Object.keys 避免原型链上的属性
-            Object.keys(value).forEach(key => {
-                // 跳过特殊属性
-                if (
-                    key.startsWith('_') || // 内部属性
-                    typeof value[key] === 'function' || // 函数
-                    typeof value[key] === 'symbol' || // Symbol
-                    value[key] === value // 自引用
-                ) {
-                    return; // 跳过此属性
-                }
-                
-                try {
-                    // 处理属性值，创建新的路径
-                    const propPath = `${fullPath}.${key}`;
-                    const cleanValue = deepClean(value[key], propPath);
-                    
-                    // 只保留有效值
-                    if (cleanValue !== undefined) {
-                        cleanObj[key] = cleanValue;
-                    }
-                } catch (err) {
-                    console.warn(`[YamlService] 处理属性 "${fullPath}.${key}" 时出错:`, err);
-                    // 跳过有问题的属性
-                }
-            });
-        } catch (err) {
-            console.warn(`[YamlService] 处理对象 ${fullPath} 时出错:`, err);
-            // 返回已处理的属性
+            if (Array.isArray(value)) return value.map((item, index) => clean(item, `${path}[${index}]`));
+            return Object.fromEntries(Object.entries(value)
+                .filter(([, item]) => item !== undefined && typeof item !== 'function' && typeof item !== 'symbol')
+                .map(([key, item]) => [key, clean(item, `${path}.${key}`)]));
+        } finally {
+            ancestors.delete(value);
         }
-        
-        return cleanObj;
     }
-    
-    return deepClean(obj, '');
+    return clean(obj, 'root');
 }

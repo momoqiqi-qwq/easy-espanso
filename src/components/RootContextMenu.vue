@@ -5,10 +5,6 @@
     </ContextMenuTrigger>
     <ContextMenuContent class="min-w-[12rem]">
       <!-- 新建操作 -->
-      <ContextMenuItem @select="handleCreateMatch" v-if="false">
-        <component :is="icons.Plus" class="mr-2 h-4 w-4" />
-        {{ t('contextMenu.newSnippet') }}
-      </ContextMenuItem>
       <ContextMenuItem @select="handleCreateConfigFile">
         <component :is="icons.File" class="mr-2 h-4 w-4" />
         {{ t('contextMenu.newConfigFile') }}
@@ -92,118 +88,7 @@ const userPreferences = useUserPreferences();
 const isContextMenuOpen = ref(false);
 
 // 创建新片段
-const handleCreateMatch = async () => {
-  try {
-    // 获取根目录
-    const rootDir = store.state.configRootDir;
-    if (!rootDir) {
-      toast.error('未设置根目录');
-      return;
-    }
 
-    // 确保match目录路径正确
-    const matchDir = `${rootDir}/match`;
-
-    // 找到match目录节点
-    let matchFolderNode = null;
-    for (const node of store.state.configTree) {
-      if (node.type === 'folder' && node.name === 'match') {
-        matchFolderNode = node;
-        break;
-      }
-    }
-
-    // 检查match目录是否存在，不存在则创建
-    const matchDirExists = await platformService.directoryExists(matchDir);
-    if (!matchDirExists) {
-      await platformService.createDirectory(matchDir);
-      toast.success('已创建match目录');
-
-      // 如果目录刚创建且在树中没有match节点，创建一个
-      if (!matchFolderNode) {
-        const { createFolderNode } = await import('@/utils/configTreeUtils');
-        matchFolderNode = createFolderNode('match', matchDir);
-        store.state.configTree.push(matchFolderNode);
-      }
-    }
-
-    // 检查是否存在配置文件，如果没有则创建一个默认的
-    let targetFileId = null;
-    let targetFileNode = null;
-
-    // 如果match文件夹节点存在，遍历其子节点查找配置文件
-    if (matchFolderNode && matchFolderNode.children && matchFolderNode.children.length > 0) {
-      for (const file of matchFolderNode.children) {
-        if (file.type === 'file') {
-          targetFileId = file.id;
-          targetFileNode = file;
-          break;
-        }
-      }
-    }
-
-    // 如果没有找到配置文件，先创建一个
-    if (!targetFileId) {
-      // 使用base.yml作为默认配置文件名
-      targetFileId = await store.createConfigFile(null, 'base.yml');
-
-      if (!targetFileId) {
-        toast.error('创建默认配置文件失败');
-        return;
-      }
-
-      toast.success('已创建默认配置文件');
-
-      // 查找新创建的文件节点
-      if (matchFolderNode && matchFolderNode.children) {
-        for (const file of matchFolderNode.children) {
-          if (file.type === 'file' && file.id === targetFileId) {
-            targetFileNode = file;
-            break;
-          }
-        }
-      }
-    }
-
-    if (!targetFileId || !targetFileNode) {
-      toast.error('无法确定创建新片段的位置');
-      return;
-    }
-
-    // 创建新片段
-    const newMatchData = {
-      trigger: ':new',
-      replace: '新片段内容',
-      label: '新片段',
-    };
-
-    const addedItem = await store.addItem(newMatchData, 'match', targetFileId, 0);
-    if (addedItem) {
-      toast.success('新片段已创建，请编辑触发词');
-
-      // 确保文件和文件夹展开
-      if (matchFolderNode) {
-        // Use store action to expand the folder node
-        if (!store.isNodeExpanded(matchFolderNode.id)) {
-          store.toggleNodeExpansion(matchFolderNode.id);
-        }
-      }
-
-      // Expand the file node
-      if (!store.isNodeExpanded(targetFileId)) {
-        store.toggleNodeExpansion(targetFileId);
-      }
-
-      // 选中新创建的片段
-      store.selectItem(addedItem.id, 'match');
-    } else {
-      toast.error('创建新片段失败');
-    }
-  } catch (error: any) {
-    console.error('创建片段失败:', error);
-    toast.error(`创建片段失败: ${error.message || '未知错误'}`);
-  }
-};
 
 // 创建新配置文件
 const handleCreateConfigFile = async () => {

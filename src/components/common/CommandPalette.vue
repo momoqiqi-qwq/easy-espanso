@@ -76,7 +76,7 @@ const MAX_MATCHES = 8;
 const MAX_FILES = 5;
 
 // ==================== 命令 ====================
-const commands = computed<Row[]>(() => {
+const commands = computed<Omit<Row, '_i'>[]>(() => {
   const k = (name: string) => t(`commandPalette.cmd.${name}`);
   return [
     { id: 'snippets', kind: 'command', title: k('snippets'), hint: k('snippetsHint'), icon: ScissorsIcon, action: () => router.push('/snippets') },
@@ -108,7 +108,7 @@ const commands = computed<Row[]>(() => {
 const triggersOf = (m: Match): string[] =>
   m.triggers && m.triggers.length ? m.triggers : m.trigger ? [m.trigger] : [];
 
-const matchedMatches = computed<Row[]>(() => {
+const matchedMatches = computed<Omit<Row, '_i'>[]>(() => {
   const q = query.value.trim().toLowerCase();
   if (!q) return [];
   return (store.allMatches || [])
@@ -151,7 +151,7 @@ const fileNodes = computed<{ id: string; name: string; path: string }[]>(() => {
   return out;
 });
 
-const matchedFiles = computed<Row[]>(() => {
+const matchedFiles = computed<Omit<Row, '_i'>[]>(() => {
   const q = query.value.trim().toLowerCase();
   if (!q) return [];
   return fileNodes.value

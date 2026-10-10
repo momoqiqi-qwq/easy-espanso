@@ -66,7 +66,7 @@ const navigateToHome = () => {
 };
 
 // 捕获组件错误
-onErrorCaptured((err, instance, info) => {
+onErrorCaptured((err, _instance, _info) => {
   console.error('AppLayout 捕获到错误:', err);
   error.value = err;
   return false; // 阻止错误继续传播
