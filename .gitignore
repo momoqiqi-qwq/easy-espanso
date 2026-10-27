@@ -55,3 +55,10 @@ test-espanso/
 .electron-builder/
 out/
 releases/
+
+# 本地临时产物 / AI 助手工作目录（不入库）
+.mut/
+.workbuddy-ai/
+ai-export/
+output/
+easy-espanso-src-*.zip

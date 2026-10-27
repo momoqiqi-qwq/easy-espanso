@@ -13,6 +13,7 @@ import { YamlData } from '@/types/core/preload.types';
 
 // Import Services (Assuming they are refactored)
 import * as espansoService from '@/services/espansoService';
+import { scheduleEspansoReload } from '@/services/espansoReloadService'; // 文件级改动后按需自动重载 Espanso
 import * as platformService from '@/services/platformService'; // Renamed from fileService
 import * as configService from '@/services/configService';
 
@@ -395,15 +396,32 @@ export const useEspansoStore = defineStore('espanso', () => {
     };
     const checkpoint = (label: string) => history.push(label, _snapshot(), userPreferences.preferences.historyLimit);
     const _persistSnapshot = async (snap: EditorSnapshot, previousFiles: string[]) => {
-        state.value.configTree = safeClone(snap.configTree);
+        // 只回写与当前内容不同的文件：撤销一次不再重写全部配置文件（避免无谓的磁盘写入、备份覆盖和 Espanso 全量重载）。
+        // 内存中仍有未保存改动时无法确定磁盘内容，退回为全部写入。
+        const before = new Map<string, { matches: Match[]; content: unknown }>();
+        if (!state.value.hasUnsavedChanges) {
+            const collect = (nodes: ConfigTreeNode[]) => nodes.forEach(n => { if (n.type === 'file') before.set(n.path, { matches: n.matches || [], content: n.content || {} }); else if (n.type === 'folder' && n.children) collect(n.children); });
+            collect(state.value.configTree);
+        }
+        // 快照已从历史栈弹出，归当前状态独占，无需再深拷贝
+        state.value.configTree = snap.configTree;
         state.value.selectedItemId = snap.selectedItemId; state.value.selectedItemType = snap.selectedItemType;
         const desired = new Set(snap.trackedFiles);
         for (const path of previousFiles) if (!desired.has(path) && await platformService.fileExists(path)) await platformService.deleteFile(path);
-        const saveNodes = async (nodes: ConfigTreeNode[]) => { for (const n of nodes) { if (n.type === 'file') await espansoService.saveConfigurationFile(n.path, n.matches || [], n.content || {}); else if (n.type === 'folder' && n.children) await saveNodes(n.children); } };
+        const saveNodes = async (nodes: ConfigTreeNode[]) => {
+            for (const n of nodes) {
+                if (n.type === 'file') {
+                    const prev = before.get(n.path);
+                    if (prev && isEqual(prev.matches, n.matches || []) && isEqual(prev.content, n.content || {})) continue;
+                    await espansoService.saveConfigurationFile(n.path, n.matches || [], n.content || {});
+                } else if (n.type === 'folder' && n.children) await saveNodes(n.children);
+            }
+        };
         await saveNodes(state.value.configTree); state.value.hasUnsavedChanges = false;
     };
-    const undo = async () => { const current=_snapshot(); const entry=history.takeUndo<EditorSnapshot>(current, userPreferences.preferences.historyLimit); if(!entry)return; await _persistSnapshot(entry.data,current.trackedFiles); toast.success(`已撤销：${entry.label}`); };
-    const redo = async () => { const current=_snapshot(); const entry=history.takeRedo<EditorSnapshot>(current, userPreferences.preferences.historyLimit); if(!entry)return; await _persistSnapshot(entry.data,current.trackedFiles); toast.success(`已重做：${entry.label}`); };
+    // 撤销/重做与其它编辑共用 runMutation 队列，避免与进行中的保存交错写盘
+    const undo = () => runMutation(async () => { const current=_snapshot(); const entry=history.takeUndo<EditorSnapshot>(current, userPreferences.preferences.historyLimit); if(!entry)return; await _persistSnapshot(entry.data,current.trackedFiles); toast.success(`已撤销：${entry.label}`); });
+    const redo = () => runMutation(async () => { const current=_snapshot(); const entry=history.takeRedo<EditorSnapshot>(current, userPreferences.preferences.historyLimit); if(!entry)return; await _persistSnapshot(entry.data,current.trackedFiles); toast.success(`已重做：${entry.label}`); });
 
     // --- Actions ---
 
@@ -579,7 +597,6 @@ export const useEspansoStore = defineStore('espanso', () => {
     };
 
     const updateMatch = (matchId: string, updates: Partial<Match>) => runMutation(async () => {
-        checkpoint('编辑片段');
         const result = findItemInTreeById(state.value.configTree, matchId);
         if (!result || result.type !== 'match') {
             _setError(`Match with ID ${matchId} not found.`);
@@ -591,6 +608,13 @@ export const useEspansoStore = defineStore('espanso', () => {
              _setError(`Match ${matchId} is missing file path.`);
              throw new Error(`Match ${matchId} is missing file path.`);
         }
+
+        // 内容与当前完全一致（如重复失焦触发的自动保存）：不写盘，也不产生空的撤销记录
+        if (Object.keys(updates).every(key => isEqual((matchRef as any)[key], (updates as any)[key]))) {
+            markNodeAsSaved(matchId);
+            return;
+        }
+        const historyToken = checkpoint('编辑片段');
 
         const previousValues = Object.fromEntries(
             Object.keys(updates).map(key => {
@@ -616,6 +640,7 @@ export const useEspansoStore = defineStore('espanso', () => {
             // _saveFileByPath already sets the error; propagate it so editors retain unsaved data.
             Object.assign(matchRef, previousValues);
             matchRef.updatedAt = previousUpdatedAt;
+            history.discard(historyToken); // 写盘失败：撤回这条撤销记录，避免留下“撤销了也没变化”的空操作
             throw err;
         }
     });
@@ -623,31 +648,46 @@ export const useEspansoStore = defineStore('espanso', () => {
 
 
     /** Save a dialog's complete group as one file write and one undo checkpoint. */
-    const saveChoiceVariants = (filePath: string, expected: Match[], variants: Match[]) => runMutation(async () => {
+    const _saveChoiceVariants = async (filePath: string, expected: Match[], variants: Match[], historyLabel: string) => {
         const file = findFileNode(state.value.configTree, filePath);
         if (!file || !expected.length || !variants.length) throw new Error('Invalid choice group');
         const ids = expected.map(match => match.id);
-        const current = (file.matches || []).filter(match => ids.includes(match.id));
+        const expectedIds = new Set(ids);
+        const current = (file.matches || []).filter(match => expectedIds.has(match.id));
         if (!isEqual(current, expected)) throw new Error('方案已在其他操作中修改，请重新打开编辑器');
-        if (new Set(variants.map(match => match.id)).size !== variants.length) throw new Error('Duplicate choice ID');
-        const remainingIds = new Set((file.matches || []).filter(match => !ids.includes(match.id)).map(match => match.id));
+        const variantIds = new Set(variants.map(match => match.id));
+        if (variantIds.size !== variants.length) throw new Error('Duplicate choice ID');
+        const remainingIds = new Set((file.matches || []).filter(match => !expectedIds.has(match.id)).map(match => match.id));
         if (variants.some(match => remainingIds.has(match.id))) throw new Error('Choice ID is already in use');
         if (!matchTriggers(variants[0]).length || variants.some(match => !sameTriggers(match, variants[0]))) throw new Error('Every choice needs the same trigger');
         const snapshot = _snapshot();
         const now = new Date().toISOString();
         const next = replaceVariants(file.matches || [], ids, safeClone(variants).map(match => ({ ...match, filePath, type: 'match', updatedAt: now })));
         await espansoService.saveConfigurationFile(filePath, next, file.content || {});
-        history.push('编辑多选方案', snapshot, userPreferences.preferences.historyLimit);
+        history.push(historyLabel, snapshot, userPreferences.preferences.historyLimit);
         file.matches = next;
         variants.forEach(match => markNodeAsSaved(match.id));
-        ids.filter(id => !variants.some(match => match.id === id)).forEach(id => {
+        ids.filter(id => !variantIds.has(id)).forEach(id => {
             state.value.modifiedNodeIds.delete(id);
             state.value.justSavedNodeIds.delete(id);
         });
-        if (ids.includes(state.value.selectedItemId || '') && !variants.some(match => match.id === state.value.selectedItemId)) {
+        if (expectedIds.has(state.value.selectedItemId || '') && (state.value.selectedItemId === null || !variantIds.has(state.value.selectedItemId))) {
             selectItem(variants[0].id, 'match');
         }
-        return next.filter(match => variants.some(variant => variant.id === match.id));
+        return next.filter(match => variantIds.has(match.id));
+    };
+
+    const saveChoiceVariants = (filePath: string, expected: Match[], variants: Match[]) =>
+        runMutation(() => _saveChoiceVariants(filePath, expected, variants, '编辑多选方案'));
+
+    /**
+     * Merge several snippets into one choice group: the keywords become a shared trigger set and
+     * every merged snippet becomes one option of that group. `variants` carries the merged
+     * options (same ids as `expected`, unsaved editor drafts already applied by the caller).
+     */
+    const mergeMatches = (filePath: string, expected: Match[], variants: Match[]) => runMutation(() => {
+        if (expected.length < 2) throw new Error('至少需要两个片段才能合并');
+        return _saveChoiceVariants(filePath, expected, variants, '合并片段');
     });
 
     const addItem = (itemData: Omit<Match, 'id'|'type'|'guiOrder'>, itemType: 'match', targetParentNodeId: string | null, insertIndex: number = -1, historyLabel: string = '新建片段') => runMutation(async () => {
@@ -907,7 +947,8 @@ export const useEspansoStore = defineStore('espanso', () => {
             setTimeout(() => { if (state.value.statusMessage === `已移动: ${itemName}`) _setStatus(null); }, 2000);
 
         } catch (err: any) {
-             state.value.configTree = beforeMove.configTree;
+             // beforeMove 可能已交给历史栈（历史栈不再复制快照），回滚时用副本，避免当前状态与历史条目共享对象
+             state.value.configTree = safeClone(beforeMove.configTree);
              console.error(`Failed to move item ${itemId}:`, err);
              _setError(`移动失败: ${err.message}`);
         }
@@ -1246,6 +1287,7 @@ export const useEspansoStore = defineStore('espanso', () => {
 
               // 2. Delete actual file
               await platformService.deleteFile(filePath); // Assumes this function exists
+              scheduleEspansoReload(); // 文件被删掉后 Espanso 需要重载才会丢掉其中的片段
 
               // Update selection AFTER deletion
               if (nextNodeId) {
@@ -1316,6 +1358,7 @@ export const useEspansoStore = defineStore('espanso', () => {
 
               // 2. Delete actual directory
               await platformService.deleteDirectory(folderPath); // Assumes this function exists
+              scheduleEspansoReload(); // 文件夹被删掉后 Espanso 需要重载才会丢掉其中的片段
 
               // Update selection AFTER deletion
               if (nextNodeId) {
@@ -1360,6 +1403,7 @@ export const useEspansoStore = defineStore('espanso', () => {
          try {
              // 1. Rename in file system FIRST
              await platformService.renameFileOrDirectory(oldPath, newPath);
+             scheduleEspansoReload(); // 文件/文件夹改名后 Espanso 需要重载才会读取新路径
 
              // 2. Update tree state
              node.name = newName;
@@ -1529,6 +1573,7 @@ export const useEspansoStore = defineStore('espanso', () => {
         updateGlobalConfig,
         updateMatch,
         saveChoiceVariants,
+        mergeMatches,
         addItem,
         deleteItem,
         moveItem,

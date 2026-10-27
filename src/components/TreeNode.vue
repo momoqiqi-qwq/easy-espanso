@@ -129,7 +129,7 @@
             <div v-if="isNodeModified" class="h-3 w-3 rounded-full bg-red-500 animate-pulse-slow mr-1" :title="t('common.modified')"></div>
 
             <!-- 刚保存状态指示器 -->
-            <div v-else-if="isNodeJustSaved" class="h-3 w-3 rounded-full bg-green-500 animate-fade-out mr-1" :title="t('common.saved')"></div>
+            <div v-else-if="isNodeJustSaved" class="h-3 w-3 rounded-full bg-green-500 animate-saved-fade mr-1" :title="t('common.saved')"></div>
 
             <!-- 默认图标 -->
             <ZapIcon
@@ -194,7 +194,13 @@
     </NodeContextMenu>
 
     <!-- Children (recursive TreeNode) -->
-    <Transition name="expand">
+    <Transition
+      :css="false"
+      @enter="onChildrenEnter"
+      @leave="onChildrenLeave"
+      @enter-cancelled="cancelCollapseAnimation"
+      @leave-cancelled="cancelCollapseAnimation"
+    >
       <!--
         Only YAML file children are sortable. Making folder/root levels sortable too
         causes SortableJS to grab the containing file when the user starts dragging a
@@ -208,7 +214,7 @@
           'shadow-[inset_0_6px_6px_-6px_hsl(var(--shadow)/0.21),_inset_0_-6px_6px_-6px_hsl(var(--shadow)/0.21)]': true,
         }"
         :group="{ name: 'matchRows', pull: true, put: true }"
-        :animation="150"
+        :animation="dragAnimationMs"
         :delay="userPreferences.preferences.dragActivationDelay"
         :delay-on-touch-only="false"
         :touch-start-threshold="4"
@@ -242,6 +248,7 @@
           @move="$emit('move', $event)"
           @moveNode="$emit('moveNode', $event)"
           @request-rename="$emit('request-rename', $event)"
+          @merge="$emit('merge', $event)"
           @toggle-node="$emit('toggle-node', $event)"
           class="drag-item"
         />
@@ -267,6 +274,7 @@
           @move="$emit('move', $event)"
           @moveNode="$emit('moveNode', $event)"
           @request-rename="$emit('request-rename', $event)"
+          @merge="$emit('merge', $event)"
           @toggle-node="$emit('toggle-node', $event)"
         />
       </div>
@@ -290,11 +298,13 @@ import VSCodeFolderIcon from "@/components/icons/VSCodeFolderIcon.vue";
 import VSCodeFolderOpenIcon from "@/components/icons/VSCodeFolderOpenIcon.vue";
 import VSCodeYmlIcon from "@/components/icons/VSCodeYmlIcon.vue";
 import type { TreeNodeItem } from "@/types/tree.types";
+import type { Match } from "@/types/core/espanso.types";
 import HighlightText from "@/components/common/HighlightText.vue";
 import { VueDraggable } from "vue-draggable-plus";
 import NodeContextMenu from "@/components/NodeContextMenu.vue";
 import { useEspansoStore } from "@/store/useEspansoStore";
 import { useUserPreferences } from "@/store/useUserPreferences";
+import { animateCollapse, cancelCollapseAnimation, useReducedMotion } from "@/utils/motion";
 import TreeNodeRegistry from "@/utils/TreeNodeRegistry";
 import { toast } from "vue-sonner";
 import { useI18n } from "vue-i18n";
@@ -326,11 +336,17 @@ const emit = defineEmits<{
     payload: { nodeId: string; targetParentId: string | null; newIndex: number }
   ): void;
   (e: "request-rename", item: TreeNodeItem): void;
+  (e: "merge", match: Match): void;
   (e: "toggle-node", nodeId: string): void;
 }>();
 
 const store = useEspansoStore();
 const userPreferences = useUserPreferences();
+// 动画：子节点按实际高度展开/收起（见 utils/motion.ts），减少动画时拖拽排序也不再滑动。
+const reducedMotion = useReducedMotion();
+const dragAnimationMs = computed(() => (reducedMotion.value ? 0 : 150));
+const onChildrenEnter = (el: Element, done: () => void) => animateCollapse(el, done, "enter");
+const onChildrenLeave = (el: Element, done: () => void) => animateCollapse(el, done, "leave");
 const { t } = useI18n();
 
 // 节点状态计算属性
@@ -350,14 +366,22 @@ const editNameInput = ref<HTMLInputElement | null>(null);
 // Use store's expansion state instead of local state
 const isOpen = computed(() => store.isNodeExpanded(props.node.id));
 
+const expandForSearch = () => {
+  // 片段叶节点没有可展开内容，避免搜索时为每条片段查树并保存无效展开状态。
+  if (
+    props.node.type !== "match" &&
+    props.node.children?.length &&
+    userPreferences.preferences.autoExpandOnSearch &&
+    props.searchQuery?.trim() &&
+    !isOpen.value
+  ) {
+    store.toggleNodeExpansion(props.node.id);
+  }
+};
+
 watch(
   () => props.searchQuery,
-  (newQuery) => {
-    if (userPreferences.preferences.autoExpandOnSearch && newQuery && newQuery.trim() !== "" && !isOpen.value) {
-      // If search query is not empty and node is not already open, toggle it
-      store.toggleNodeExpansion(props.node.id);
-    }
-  },
+  expandForSearch,
   { immediate: true }
 );
 
@@ -504,115 +528,55 @@ const isVisible = computed(() => {
 
 // Auto-expand node if it becomes visible due to search results
 watch(isVisible, (newValue, oldValue) => {
-  if (userPreferences.preferences.autoExpandOnSearch && newValue && !oldValue && props.searchQuery?.trim() && !isOpen.value) {
-    // Use store action instead of directly modifying computed property
-    store.toggleNodeExpansion(props.node.id);
-  }
+  if (newValue && !oldValue) expandForSearch();
 });
 
-// Cache for visible child count to avoid re-computation
-const nodeCountCache = new Map<string, number>();
-
+// 可见片段计数。computed 本身已按依赖缓存；原先额外的 Map 缓存以节点 id 为键，
+// 增删/编辑片段后会一直返回旧数字，且每输入一个搜索词都会新增条目、永不清理。
 const visibleChildCount = computed(() => {
-  if (!props.node.children) return 0;
+  const children = props.node.children;
+  if (!children?.length) return 0;
+  if (props.node.type !== "folder" && props.node.type !== "file") return 0;
 
-  // --- No Search Query ---
-  if (!props.searchQuery || props.searchQuery.trim() === "") {
-    if (props.node.type === "folder" || props.node.type === "file") {
-      const cacheKey = `${props.node.id}-no-search`;
-      if (nodeCountCache.has(cacheKey)) {
-        return nodeCountCache.get(cacheKey)!;
+  const query = props.searchQuery?.trim();
+  if (!query) {
+    let count = 0;
+    const countItems = (nodes: TreeNodeItem[]) => {
+      for (const node of nodes) {
+        if (node.type === "match") count++;
+        else if (node.children?.length) countItems(node.children);
       }
-
-      let count = 0;
-      const countItems = (nodes: TreeNodeItem[]) => {
-        for (const node of nodes) {
-          if (node.type === "match") {
-            count++;
-          } else if (node.children && node.children.length > 0) {
-            countItems(node.children); // Recursively count in sub-folders/files
-          }
-        }
-      };
-      countItems(props.node.children);
-      nodeCountCache.set(cacheKey, count);
-      return count;
-    }
-    return 0; // Should not happen for valid parent types
+    };
+    countItems(children);
+    return count;
   }
 
-  // --- With Search Query ---
-  // Count visible matches within this node's children based on the search query
-  const query = props.searchQuery.trim().toLowerCase();
-  const cacheKey = `${props.node.id}-search-${query}`;
-  if (nodeCountCache.has(cacheKey)) {
-    return nodeCountCache.get(cacheKey)!;
-  }
-
+  // 搜索时：正则只编译一次；祖先命中则其下全部片段可见，否则逐个片段判断自身是否命中
+  const regex = new RegExp(escapeRegex(query), "i");
+  const nodeMatches = (node: TreeNodeItem): boolean => {
+    if (node.type !== "match") return checkMatch(node.name, regex);
+    const m = node.match;
+    if (!m) return false;
+    return (
+      checkMatch(m.trigger, regex) ||
+      (Array.isArray(m.triggers) && m.triggers.some((t) => checkMatch(t, regex))) ||
+      checkMatch(m.label, regex) ||
+      checkMatch(m.description, regex) ||
+      checkMatch(m.replace?.toString(), regex)
+    );
+  };
   let count = 0;
-  const countVisibleMatches = (
-    nodes: TreeNodeItem[],
-    parentMatchesQuery: boolean
-  ) => {
+  const countVisible = (nodes: TreeNodeItem[], ancestorMatches: boolean) => {
     for (const child of nodes) {
-      const childSelfMatches = (() => {
-        try {
-          const escapedQuery = escapeRegex(query);
-          const regex = new RegExp(escapedQuery, "i");
-          if (child.type !== "match") {
-            return checkMatch(child.name, regex);
-          } else if (child.match) {
-            const m = child.match;
-            return (
-              checkMatch(m.trigger, regex) ||
-              (Array.isArray(m.triggers) &&
-                m.triggers.some((t) => checkMatch(t, regex))) ||
-              checkMatch(m.label, regex) ||
-              checkMatch(m.description, regex) ||
-              checkMatch(m.replace?.toString(), regex)
-            );
-          }
-          return false;
-        } catch {
-          return false;
-        }
-      })();
-
-      let childDescendantMatches = false;
-      if (child.children && child.children.length > 0) {
-        // Simplified check: does *any* descendant match?
-        // A more accurate count would require full recursion here, but might be slow.
-        // Let's stick to a simpler check for performance.
-        // We only need to know if *this* node should display a count,
-        // not the exact count of *visible* descendants further down.
-        // The current `descendantMatchesSearch` logic handles visibility.
-        // Here, we just count direct children that are matches and match the query.
-      }
-
-      const childIsVisible =
-        parentMatchesQuery || childSelfMatches || childDescendantMatches;
-
-      if (childIsVisible && child.type === "match") {
-        count++;
-      }
-
-      // Recursively count for folder/file children if they are visible
-      if (
-        (child.type === "folder" || child.type === "file") &&
-        child.children &&
-        child.children.length > 0 &&
-        childIsVisible
-      ) {
-        countVisibleMatches(
-          child.children,
-          childSelfMatches || parentMatchesQuery
-        );
+      const visible = ancestorMatches || nodeMatches(child);
+      if (child.type === "match") {
+        if (visible) count++;
+      } else if (child.children?.length) {
+        countVisible(child.children, visible);
       }
     }
   };
-
-  countVisibleMatches(props.node.children, selfMatchesSearch.value);
-  nodeCountCache.set(cacheKey, count);
+  countVisible(children, selfMatchesSearch.value);
   return count;
 });
 
@@ -620,10 +584,7 @@ const visibleChildCount = computed(() => {
 watch(
   () => props.parentMatches,
   (newValue) => {
-    if (userPreferences.preferences.autoExpandOnSearch && newValue && props.searchQuery?.trim() && !isOpen.value) {
-      // Use store action instead of directly modifying computed property
-      store.toggleNodeExpansion(props.node.id);
-    }
+    if (newValue) expandForSearch();
   },
   { immediate: true }
 );
@@ -959,7 +920,8 @@ const nodeLevel = computed(() => props.level || 0);
   box-sizing: border-box;
   width: 100%;
   position: relative; /* 确保绝对定位的子元素相对于此元素定位 */
-  transition: background-color 0.1s ease-out, transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); /* 统一过渡效果，添加transform过渡 */
+  /* 选中位移改用减速曲线，不再回弹；只过渡真正会变的属性 */
+  transition: background-color 120ms ease-out, transform 180ms var(--motion-ease-out, cubic-bezier(0.2, 0, 0, 1));
 }
 
 /* 选中节点的动态效果 */
@@ -979,7 +941,8 @@ const nodeLevel = computed(() => props.level || 0);
   height: 100%;
   pointer-events: none; /* 确保不影响点击事件 */
   border-radius: 2px;
-  animation: select-pulse 2s infinite ease-in-out;
+  /* 选中时轻轻提示一次即可：以前无限循环，只要有选中项就每帧重绘 */
+  animation: select-pulse 1.2s ease-out 1;
   opacity: 0.2;
   z-index: 0;
 }
@@ -1055,21 +1018,7 @@ const nodeLevel = computed(() => props.level || 0);
   z-index: 1;
 }
 
-/* Improved expand/collapse transition */
-.expand-enter-active,
-.expand-leave-active {
-  transition: all 0.2s ease-out; /* Faster transition */
-  max-height: 1000px; /* Adjust if needed, large enough for content */
-  overflow: hidden;
-  opacity: 1;
-}
-
-.expand-enter-from,
-.expand-leave-to {
-  max-height: 0;
-  opacity: 0;
-  overflow: hidden;
-}
+/* 展开/收起动画由 utils/motion.ts 的 animateCollapse 按实际高度驱动（不再用 max-height 过渡）。 */
 
 /* Ensure children div itself doesn't have conflicting transition */
 .children {

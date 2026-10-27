@@ -17,7 +17,14 @@
     <!-- 正常设置内容 -->
     <div v-else class="content-view flex flex-col">
       <div class="flex flex-wrap justify-between items-center gap-3 mb-3">
-        <h1 class="text-2xl font-bold">{{ t('settings.title') }}</h1>
+        <div class="flex items-baseline gap-3 min-w-0">
+          <h1 class="text-2xl font-bold">{{ t('settings.title') }}</h1>
+          <span
+            v-if="settingsAutoSaveLabel"
+            class="settings-autosave-state"
+            :class="settingsAutoSaveStatus"
+          >{{ settingsAutoSaveLabel }}</span>
+        </div>
         <div class="flex items-center gap-2">
           <Button variant="outline" @click="resetToDefault" :disabled="!hasChanges || isSaving">
             <Undo2 class="w-4 h-4 mr-2" />
@@ -29,6 +36,10 @@
             {{ isSaving ? t('settings.savingSettings') : t('settings.saveSettings') }}
           </Button>
         </div>
+      </div>
+
+      <div class="settings-autosave-hint">
+        {{ userPreferences.preferences.autoSave ? t('settings.autoSaveOnHint') : t('settings.autoSaveOffHint') }}
       </div>
       
       <Separator class="my-4" />
@@ -397,7 +408,7 @@
                 v-model="sidebarOrder"
                 class="sidebar-order-preview"
                 handle=".sidebar-order-handle"
-                :animation="150"
+                :animation="reducedMotion ? 0 : 150"
               >
                 <div v-for="item in sidebarOrder" :key="item" class="sidebar-order-item">
                   <GripVertical class="sidebar-order-handle w-4 h-4" />
@@ -412,6 +423,14 @@
                 <Label for="check_espanso_startup">{{ t('settings.interfaceSettings.checkEspansoOnStartup') }}</Label>
               </div>
               <p class="text-xs text-muted-foreground mt-1">{{ t('settings.interfaceSettings.checkEspansoOnStartupHint') }}</p>
+            </div>
+
+            <div class="form-item">
+              <div class="flex items-center space-x-2">
+                <Checkbox id="auto_reload_espanso" v-model="autoReloadEspanso" />
+                <Label for="auto_reload_espanso">{{ t('settings.interfaceSettings.autoReloadEspanso') }}</Label>
+              </div>
+              <p class="text-xs text-muted-foreground mt-1">{{ t('settings.interfaceSettings.autoReloadEspansoHint') }}</p>
             </div>
 
             <div class="form-item">
@@ -1192,10 +1211,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, watch, onErrorCaptured } from "vue";
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, onErrorCaptured } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useEspansoStore } from "@/store/useEspansoStore";
 import { useUserPreferences } from "@/store/useUserPreferences";
+import { useReducedMotion } from "@/utils/motion";
 import { cloneDeep, isEqual } from "lodash-es";
 import { toast } from "vue-sonner";
 import { useI18n } from 'vue-i18n';
@@ -1259,6 +1279,7 @@ const { theme: appTheme, setTheme: setAppTheme } = useTheme();
 // 获取store
 const store = useEspansoStore();
 const userPreferences = useUserPreferences();
+const reducedMotion = useReducedMotion();
 const route = useRoute();
 const router = useRouter();
 
@@ -1333,6 +1354,10 @@ const sidebarOrder = computed<SidebarRouteId[]>({
 const checkEspansoOnStartup = computed({
   get: () => userPreferences.preferences.checkEspansoOnStartup,
   set: (value) => userPreferences.updatePreference('checkEspansoOnStartup', value),
+});
+const autoReloadEspanso = computed({
+  get: () => userPreferences.preferences.autoReloadEspanso,
+  set: (value: boolean) => userPreferences.updatePreference('autoReloadEspanso', value),
 });
 const toastPosition = computed({
   get: () => userPreferences.preferences.toastPosition,
@@ -1489,7 +1514,7 @@ const isLinux = computed(() => !isMacOS.value && !isWindows.value);
 const settingsSearch = ref('');
 const categorySearchKeywords: Record<string, string> = {
   basic: 'language hotkey shortcut backend restart 语言 快捷键 后端 重启',
-  interface: 'theme color font density sidebar toast history drag tree backup import export 主题 颜色 字体 密度 侧栏 通知 历史 拖拽 缩进 备份 导入 导出',
+  interface: 'theme color font density sidebar toast history drag tree backup import export espanso reload restart 主题 颜色 字体 密度 侧栏 通知 历史 拖拽 缩进 备份 导入 导出 重载 自动重载',
   espanso: 'status path start stop restart install service 状态 路径 启动 停止 重启 安装 服务',
   paste: 'clipboard paste inject delay threshold 剪贴板 粘贴 注入 延迟 阈值',
   notification: 'notification icon sound 通知 图标 声音',
@@ -1759,18 +1784,54 @@ const tryReload = () => {
     });
 };
 
+// ==================== 全局配置自动保存（对齐片段 / 应用配置 / 扩展） ====================
+// 和片段编辑的区别：设置页先把改动落在 localConfig 草稿上，所以自动保存要先跑一遍校验，
+// 避免把「数字框被清空」这种中间状态写进 config.yml；校验不过就保持草稿不落盘。
+// 「保存设置」按钮保留为立即保存的出口，同时也是校验失败时的强制出口。
+const SETTINGS_AUTO_SAVE_DELAY = 900;
+let settingsAutoSaveTimer: ReturnType<typeof setTimeout> | null = null;
+let settingsAutoSaveHintTimer: ReturnType<typeof setTimeout> | null = null;
+const settingsAutoSaveStatus = ref<'idle' | 'saving' | 'saved' | 'error'>('idle');
+const settingsAutoSaveLabel = computed(() => {
+  if (settingsAutoSaveStatus.value === 'saving') return t('settings.autoSaveSaving');
+  if (settingsAutoSaveStatus.value === 'saved') return t('settings.autoSaveSaved');
+  if (settingsAutoSaveStatus.value === 'error') return t('settings.autoSaveError');
+  return '';
+});
+
+const clearSettingsAutoSaveTimer = () => {
+  if (settingsAutoSaveTimer) {
+    clearTimeout(settingsAutoSaveTimer);
+    settingsAutoSaveTimer = null;
+  }
+};
+
+const clearSettingsAutoSaveHint = () => {
+  if (settingsAutoSaveHintTimer) {
+    clearTimeout(settingsAutoSaveHintTimer);
+    settingsAutoSaveHintTimer = null;
+  }
+  settingsAutoSaveStatus.value = 'idle';
+};
+
+const NUMERIC_SETTING_KEYS = [
+  'clipboard_threshold',
+  'pre_paste_delay',
+  'post_paste_delay',
+  'x11_key_delay',
+  'inject_delay',
+] as const;
+
+/** 数字框被清空（用户正在重打）时先不落盘，等他输完再说 */
+const hasEmptyNumericSetting = () => NUMERIC_SETTING_KEYS.some((key) => {
+  const value = localConfig[key];
+  return value === '' || value === null || value === undefined;
+});
+
 // 保存前做最小但严格的类型与范围校验，避免数字输入被写成字符串或负值。
 const validateSettings = () => {
-  const nonNegativeFields = [
-    ['clipboard_threshold', localConfig.clipboard_threshold],
-    ['pre_paste_delay', localConfig.pre_paste_delay],
-    ['post_paste_delay', localConfig.post_paste_delay],
-    ['x11_key_delay', localConfig.x11_key_delay],
-    ['inject_delay', localConfig.inject_delay],
-  ] as const;
-
-  for (const [key, value] of nonNegativeFields) {
-    const numericValue = Number(value);
+  for (const key of NUMERIC_SETTING_KEYS) {
+    const numericValue = Number(localConfig[key]);
     if (!Number.isFinite(numericValue) || numericValue < 0) {
       throw new Error(`${key} 必须是大于或等于 0 的数字`);
     }
@@ -1778,10 +1839,20 @@ const validateSettings = () => {
   }
 };
 
-// 保存设置
-const saveSettings = async () => {
+/**
+ * 把当前草稿写盘。返回是否成功。
+ * @param options.toast true = 用户点「保存设置」：给成功/失败反馈并重新加载配置；
+ *                      false（默认）= 停止输入后的静默自动保存。
+ */
+const persistSettings = async (options: { toast?: boolean } = {}) => {
+  if (isSaving.value) return false;
+  const explicit = options.toast === true;
   try {
     isSaving.value = true;
+    if (!explicit) {
+      clearSettingsAutoSaveHint();
+      settingsAutoSaveStatus.value = 'saving';
+    }
     validateSettings();
     console.log('开始保存设置:', localConfig);
     
@@ -1801,10 +1872,24 @@ const saveSettings = async () => {
     // 更新原始配置，重置修改状态
     originalConfig.value = cloneDeep(localConfig);
     console.log('设置保存成功');
-    toast.success(t('settings.settingsSaved'));
+    if (explicit) {
+      clearSettingsAutoSaveHint();
+      toast.success(t('settings.settingsSaved'));
 
-    // 重新加载配置以确保所有更改都已正确应用
-    await loadConfig();
+      // 重新加载配置以确保所有更改都已正确应用
+      await loadConfig();
+    } else {
+      // 先清上一轮的提示计时器，再置为「已自动保存」，否则会被 clearSettingsAutoSaveHint 立刻重置回 idle
+      clearSettingsAutoSaveHint();
+      settingsAutoSaveStatus.value = 'saved';
+      settingsAutoSaveHintTimer = setTimeout(() => {
+        settingsAutoSaveStatus.value = 'idle';
+        settingsAutoSaveHintTimer = null;
+      }, 1500);
+      // 保存期间用户又改了内容：补一次
+      if (hasChanges.value) scheduleSettingsAutoSave();
+    }
+    return true;
   } catch (error: any) {
     console.error('保存设置失败:', error);
     
@@ -1821,15 +1906,53 @@ const saveSettings = async () => {
       toast.error(t('settings.settingsSaveFailed', { error: errorMessage }));
     }
     
-    // 如果保存失败，可能需要重新加载原始配置
-    await loadConfig();
+    if (explicit) {
+      // 如果保存失败，可能需要重新加载原始配置
+      await loadConfig();
+    } else {
+      // 自动保存失败：保留用户草稿，只在顶部提示状态，不重新加载覆盖他的输入
+      settingsAutoSaveStatus.value = 'error';
+    }
+    return false;
   } finally {
     isSaving.value = false;
   }
 };
 
+/** 「保存设置」按钮：立即保存，顺手清掉挂起的自动保存，避免重复写盘 */
+const saveSettings = async () => {
+  clearSettingsAutoSaveTimer();
+  await persistSettings({ toast: true });
+};
+
+/** 停止输入后自动落盘；受「自动保存编辑」偏好控制，数字框被清空时先跳过 */
+const scheduleSettingsAutoSave = () => {
+  if (!isConfigLoaded.value || isSaving.value) return;
+  if (!userPreferences.preferences.autoSave) return;
+  if (!hasChanges.value) return;
+  if (hasEmptyNumericSetting()) return;
+  clearSettingsAutoSaveTimer();
+  settingsAutoSaveTimer = setTimeout(() => {
+    settingsAutoSaveTimer = null;
+    // 这 900ms 里状态可能又变了：已经在保存 / 已无改动 / 数字框被清空，都别再写一次
+    if (isSaving.value || !hasChanges.value || hasEmptyNumericSetting()) return;
+    void persistSettings();
+  }, SETTINGS_AUTO_SAVE_DELAY);
+};
+
+watch(localConfig, scheduleSettingsAutoSave, { deep: true });
+
+// 离开设置页前把挂起的改动冲刷掉，别丢掉最后一次输入
+onBeforeUnmount(() => {
+  if (!settingsAutoSaveTimer) return;
+  clearSettingsAutoSaveTimer();
+  if (!hasChanges.value || hasEmptyNumericSetting()) return;
+  void persistSettings();
+});
+
 // 重置为默认值
 const resetToDefault = () => {
+  clearSettingsAutoSaveTimer();
   if (originalConfig.value) {
     Object.assign(localConfig, cloneDeep(originalConfig.value));
     toast.info(t('settings.restoredToLastSave'));
@@ -1882,6 +2005,31 @@ watch(selectedAppTheme, (newThemeChoice) => { // 当用户在下拉框中选择�
   @apply bg-card text-foreground; /* 确保背景和文本颜色正确 */
 }
 
+/* 自动保存状态：与「应用配置」那处保持同一套低干扰表达 */
+.settings-autosave-state {
+  font-size: 12px;
+  padding: 1px 7px;
+  border-radius: 9999px;
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
+  white-space: nowrap;
+}
+.settings-autosave-state.saved {
+  background: hsl(142 71% 45% / 0.16);
+  color: hsl(142 60% 30%);
+}
+.settings-autosave-state.error {
+  background: hsl(var(--destructive) / 0.14);
+  color: hsl(var(--destructive));
+}
+.settings-autosave-hint {
+  margin: -4px 0 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: right;
+  color: hsl(var(--muted-foreground));
+}
+
 .settings-container {
   display: flex;
   gap: 2rem;
@@ -1911,7 +2059,7 @@ watch(selectedAppTheme, (newThemeChoice) => { // 当用户在下拉框中选择�
   border-radius: 0.375rem;
   margin-bottom: 0.5rem;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background-color 150ms ease, color 150ms ease, box-shadow 150ms ease;
   width: 100%;
   justify-content: flex-start;
   text-align: left;

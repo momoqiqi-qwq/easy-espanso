@@ -49,6 +49,7 @@ import {
   ClipboardCopyIcon,
   ClipboardPasteIcon,
   ScissorsIcon,
+  CombineIcon,
   PencilIcon,
   ChevronsUpDownIcon,
   ExternalLinkIcon,
@@ -67,6 +68,7 @@ import {
 import { useContextMenu } from "@/hooks/useContextMenu";
 import { ref, defineProps, defineEmits, computed } from "vue";
 import type { TreeNodeItem } from "@/types/tree.types";
+import type { Match } from "@/types/core/espanso.types";
 import { useI18n } from "vue-i18n";
 
 const t = useI18n().t;
@@ -91,6 +93,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: "request-rename", item: TreeNodeItem): void;
+  (e: "merge", match: Match): void;
   (
     e: "move",
     payload: {
@@ -131,6 +134,11 @@ const handleContextMenuUpdate = (open: boolean) => {
 
 const handleRequestRename = () => {
   emit("request-rename", props.node);
+};
+
+// 合并片段：交给上层打开合并对话框（本组件不直接改树）
+const handleMergeSnippets = () => {
+  if (props.node.match) emit("merge", props.node.match);
 };
 
 // 打开 Espanso 官方包网站
@@ -391,6 +399,12 @@ const computedMenuItems = computed((): MenuItem[] => {
         icon: ClipboardPasteIcon,
         action: handlePasteItem,
         shortcut: `${platformKey}+V`,
+        separator: true,
+      },
+      {
+        label: t('contextMenu.mergeSnippet'),
+        icon: CombineIcon,
+        action: handleMergeSnippets,
         separator: true,
       },
       {

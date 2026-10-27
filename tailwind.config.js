@@ -149,6 +149,11 @@ module.exports = {
           "0%, 100%": { opacity: 1 },
           "50%": { opacity: 0.5 }
         },
+        // 「已保存」绿点：先停留，再在最后 30% 渐隐
+        "saved-fade": {
+          "0%, 70%": { opacity: 1 },
+          "100%": { opacity: 0 }
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
@@ -161,6 +166,7 @@ module.exports = {
         "scale-out": "scale-out 0.2s ease-in",
         "pulse-slow": "pulse-slow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite",
         "fade-out-slow": "fade-out 2s ease-in forwards",
+        "saved-fade": "saved-fade 2s ease-out forwards",
       },
     },
   },

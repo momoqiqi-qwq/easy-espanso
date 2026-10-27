@@ -84,14 +84,14 @@ body.dragging-active {
 .valid-drop-target {
   background-color: rgba(34, 197, 94, 0.1) !important;
   border: 1px dashed #22c55e !important;
-  transition: all 0.2s ease;
+  transition: background-color 150ms ease, border-color 150ms ease;
 }
 
 /* 无效的放置目标 */
 .invalid-drop-target {
   background-color: rgba(239, 68, 68, 0.1) !important;
   border: 1px dashed #ef4444 !important;
-  transition: all 0.2s ease;
+  transition: background-color 150ms ease, border-color 150ms ease;
 }
 
 /* 拖拽过程中突出显示安全区域 */
@@ -113,27 +113,19 @@ body.dragging-active .drop-zone:hover {
   background-color: #3b82f6; /* 蓝色 */
   z-index: 2000;
   pointer-events: none; /* 确保指示线不会干扰鼠标事件 */
-  box-shadow: 0 0 8px rgba(59, 130, 246, 0.8);
-  animation: insert-indicator-pulse 1.5s infinite;
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.9);
+  animation: insert-indicator-pulse 1.5s ease-in-out infinite;
   border-radius: 2px; /* 添加圆角 */
   opacity: 1 !important; /* 确保完全不透明 */
 }
 
+/* 只做 transform 脉冲（可走合成层），不再逐帧重绘阴影 */
 @keyframes insert-indicator-pulse {
-  0% {
-    opacity: 0.9;
-    box-shadow: 0 0 8px rgba(59, 130, 246, 0.8);
+  0%, 100% {
     transform: scaleY(1);
   }
   50% {
-    opacity: 1;
-    box-shadow: 0 0 12px rgba(59, 130, 246, 1);
-    transform: scaleY(1.5); /* 增加脉冲效果 */
-  }
-  100% {
-    opacity: 0.9;
-    box-shadow: 0 0 8px rgba(59, 130, 246, 0.8);
-    transform: scaleY(1);
+    transform: scaleY(1.5);
   }
 }
 
@@ -209,7 +201,7 @@ body.dragging-active .drop-zone:hover {
 
 /* 全局卡片悬停效果 */
 .card {
-  transition-property: all;
+  transition-property: background-color, border-color, box-shadow;
   transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
   transition-duration: 250ms;
 }
@@ -245,18 +237,40 @@ html[data-ui-density="spacious"] .node-row {
   padding-bottom: 0.6rem !important;
 }
 
-/* Accessibility/performance option: minimize non-essential motion. */
+/* Accessibility/performance option: minimize non-essential motion.
+   应用内「减少动画」开关，或系统设置里关闭了动画效果，任一生效。
+   JS 驱动的动画（树展开、拖拽排序）见 utils/motion.ts。 */
 html[data-reduce-motion="true"] *,
 html[data-reduce-motion="true"] *::before,
 html[data-reduce-motion="true"] *::after {
   animation-duration: 0.01ms !important;
   animation-iteration-count: 1 !important;
+  animation-delay: 0ms !important;
   transition-duration: 0.01ms !important;
+  transition-delay: 0ms !important;
   scroll-behavior: auto !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* User-controlled overall UI scale and navigation width. */
 :root {
+  /* 统一动效参数（与 utils/motion.ts 的 MOTION 保持一致） */
+  --motion-fast: 120ms;
+  --motion-base: 180ms;
+  --motion-ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --motion-ease-in: cubic-bezier(0.4, 0, 1, 1);
   --easy-font-scale: 1;
   --easy-sidebar-width: 75px;
   --easy-scrollbar-size: 8px;

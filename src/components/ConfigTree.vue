@@ -21,6 +21,7 @@
             @moveNode="handleNodeMove"
             @request-rename="handleRequestRename"
             :on-request-rename="handleRequestRename"
+            @merge="handleMergeRequest"
           />
       </template>
     </div>
@@ -50,6 +51,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'select', item: Match): void;
   (e: 'request-rename', item: TreeNodeItem): void;
+  (e: 'merge', match: Match): void;
 }>();
 
 const store = useEspansoStore();
@@ -115,6 +117,11 @@ const handleRequestRename = (item: TreeNodeItem) => {
 };
 
 const treeHasFocus = ref(false);
+
+// 合并片段：把片段向上抛给中间面板打开合并对话框
+const handleMergeRequest = (match: Match) => {
+  emit('merge', match);
+};
 
 // 树组件点击处理函数
 const handleTreeClick = (event: MouseEvent) => {

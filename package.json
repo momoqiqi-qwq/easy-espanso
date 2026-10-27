@@ -1,6 +1,6 @@
 {
   "name": "easy-espanso",
-  "version": "1.4.1",
+  "version": "1.4.5",
   "author": {
     "name": "Easy Espanso Team",
     "email": "906155099@qq.com"
@@ -14,7 +14,7 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "typecheck": "vue-tsc --noEmit",
-    "test": "node scripts/test-editor.mjs && node scripts/test-updates.mjs --offline"
+    "test": "node scripts/test-editor.mjs && node scripts/test-snippet-list.mjs && node scripts/test-updates.mjs --offline"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",

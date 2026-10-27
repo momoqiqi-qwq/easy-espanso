@@ -137,6 +137,7 @@
               :selected-id="selectedItemId"
               :searchQuery="searchQuery.trim()"
               @select="handleTreeItemSelect"
+              @merge="openMergeDialog"
             />
           </div>
 
@@ -159,6 +160,14 @@
         </div>
       </div>
     </RootContextMenu>
+
+    <!-- 合并片段：从树右键菜单打开，勾选片段后把关键词并成一组多选 -->
+    <MergeSnippetsDialog
+      v-model:open="mergeOpen"
+      :file-path="mergeTarget?.filePath || null"
+      :preset-ids="mergePresetIds"
+      @merged="handleMerged"
+    />
   </div>
 </template>
 
@@ -171,7 +180,9 @@ import { Badge } from "../ui/badge";
 
 import ConfigTree from "@/components/ConfigTree.vue";
 import SnippetListItem from "@/components/common/SnippetListItem.vue";
+import MergeSnippetsDialog from "@/components/forms/MergeSnippetsDialog.vue";
 import { getContentPreview } from "@/utils/snippetPreview";
+import { useSnippetList } from "@/utils/snippetListUtils";
 import RootContextMenu from "@/components/RootContextMenu.vue";
 import {
   SearchIcon,
@@ -188,6 +199,12 @@ import { useI18n } from 'vue-i18n';
 const { t } = useI18n();
 
 const store = useEspansoStore();
+
+// 合并片段完成后通知外层，让右侧编辑器同步基线
+const emit = defineEmits<{
+  (e: 'merge-saved', matches: Match[]): void;
+}>();
+
 const searchQuery = ref("");
 const viewMode = ref<"tree" | "list">("tree");
 const showSearchBar = ref(false);
@@ -339,109 +356,12 @@ const selectedItemId = computed(() => store.state.selectedItemId);
 const filterTags = computed(() => store.state.selectedTags);
 const loading = computed(() => store.state.loading);
 
-// 过滤和排序项目
-const filteredItems = computed(() => {
-  if (!store.allMatches) return [];
-
-  let allMatches = store.allMatches;
-  let allItems = [...allMatches];
-
-  const query = searchQuery.value.trim().toLowerCase();
-  const tags = filterTags.value || [];
-
-  // Handle no query/tags case
-  if (!query && tags.length === 0) {
-    allItems.sort((a, b) => {
-      // 首先按日期排序（最新的在前）
-      const dateA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
-      const dateB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
-
-      if (dateA !== dateB) {
-        return dateB - dateA; // 最新的在前
-      }
-
-      // 仅当日期相同时才考虑guiOrder
-      const orderA = a.guiOrder ?? Infinity;
-      const orderB = b.guiOrder ?? Infinity;
-      return orderA - orderB;
-    });
-    return allItems;
-  }
-
-  // Helper function to check if a single item matches query or tags
-  const itemMatchesQueryOrTags = (
-    item: Match,
-    query: string,
-    tags: string[]
-  ): boolean => {
-    let queryMatch: boolean = false; // Initialize explicitly
-    if (query) {
-      if (item.type === "match") {
-        const match = item as Match;
-        queryMatch =
-          match.trigger?.toLowerCase().includes(query) ||
-          match.label?.toLowerCase().includes(query) ||
-          match.description?.toLowerCase().includes(query) ||
-          match.replace?.toString().toLowerCase().includes(query) ||
-          (match.tags &&
-            match.tags.some((tag: string) =>
-              tag.toLowerCase().includes(query)
-            )) ||
-          (match.filePath && match.filePath.toLowerCase().includes(query)) ||
-          false;
-      }
-    }
-    let tagMatch = false;
-    if (tags.length > 0) {
-      if (item.type === "match") {
-        const match = item as Match;
-        tagMatch =
-          (match.tags &&
-            tags.every((tag: string) => match.tags?.includes(tag))) ||
-          false;
-      }
-    }
-    return queryMatch || tagMatch;
-  };
-
-  // 1. Initial Filter & 2. Identify Matched Groups
-  const directlyMatchedItems: Match[] = [];
-
-  for (const item of allItems) {
-    if (itemMatchesQueryOrTags(item, query, tags)) {
-      directlyMatchedItems.push(item);
-    }
-  }
-
-  // 3. Second Pass - Include Matches *under* the matched groups
-  const finalItemMap = new Map<string, Match>();
-
-  // Add directly matched items first
-  for (const item of directlyMatchedItems) {
-    finalItemMap.set(item.id, item);
-  }
-
-  // 4. Convert Map back to Array and Sort
-  let finalItems = Array.from(finalItemMap.values());
-
-  // 修改排序优先级：始终优先按修改日期排序（最新的在前）
-  finalItems.sort((a, b) => {
-    // 首先按日期排序（最新的在前）
-    const dateA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
-    const dateB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
-
-    if (dateA !== dateB) {
-      return dateB - dateA; // 最新的在前
-    }
-
-    // 仅当日期相同时才考虑guiOrder
-    const orderA = a.guiOrder ?? Infinity;
-    const orderB = b.guiOrder ?? Infinity;
-    return orderA - orderB;
-  });
-
-  return finalItems;
-});
+// 排序只依赖片段数据；搜索词和标签变化复用已排序结果。
+const filteredItems = useSnippetList(
+  () => store.allMatches,
+  () => searchQuery.value,
+  () => filterTags.value || [],
+);
 
 // 内容预览（与「应用专用片段」列表共用同一实现）
 
@@ -509,6 +429,27 @@ const hideSearchBar = () => {
 const handleTreeItemSelect = (item: Match) => {
   // 直接调用 store action，传递 ID 和类型
   store.selectItem(item.id, item.type);
+};
+
+// --- 合并片段 ---
+const mergeOpen = ref(false);
+const mergeTarget = ref<Match | null>(null);
+const mergePresetIds = computed(() => (mergeTarget.value ? [mergeTarget.value.id] : []));
+
+const openMergeDialog = (match: Match) => {
+  if (!match.filePath) return;
+  mergeTarget.value = match;
+  mergeOpen.value = true;
+};
+
+const handleMerged = (matches: Match[]) => {
+  // 合并保留原 id，选中的片段仍有效；否则选中合并后的第一个候选
+  const first = matches[0];
+  if (first && !matches.some((match) => match.id === store.state.selectedItemId)) {
+    store.selectItem(first.id, 'match');
+  }
+  // 让右侧编辑器丢掉过期基线，否则它的旧触发词会被下一次自动保存写回去
+  emit('merge-saved', matches);
 };
 
 // --- Total Item Count ---

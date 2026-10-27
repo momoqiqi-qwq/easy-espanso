@@ -33,6 +33,18 @@
       <ChoiceVariantsEditor v-if="props.rule && !isStandalone" :rule="props.rule" :get-current-draft="getFormData" :busy="isSaving"
         @update:open="choicesOpen = $event" @saved="handleChoicesSaved" />
 
+      <!-- 合并片段：把本文件里多个片段的关键词并成一组共用触发词，内容变成多选候选 -->
+      <div v-if="props.rule && !isStandalone" class="flex flex-wrap items-center gap-2 border-b pb-3 text-sm">
+        <Combine class="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+        <span class="font-medium">{{ t('merge.title') }}</span>
+        <span class="text-muted-foreground">{{ t('merge.hint') }}</span>
+        <Button type="button" size="sm" variant="outline" class="ml-auto h-7" :disabled="isSaving" @mousedown.prevent @click="openMerge">
+          {{ t('merge.button') }}
+        </Button>
+      </div>
+      <MergeSnippetsDialog v-model:open="mergeOpen" :file-path="props.rule?.filePath || null" :preset-ids="mergePresetIds"
+        :get-current-draft="getFormData" :busy="isSaving" @merged="handleMergeSaved" />
+
       <!-- 内容类型选择器 & 替换内容 -->
       <div class="space-y-2 flex-1 flex flex-col overflow-hidden">
         <div class="flex items-center justify-between">
@@ -522,6 +534,7 @@ import {
 import TagInput from "../common/TagInput.vue";
 import VariableSelector from "./VariableSelector.vue";
 import ChoiceVariantsEditor from "./ChoiceVariantsEditor.vue";
+import MergeSnippetsDialog from "./MergeSnippetsDialog.vue";
 import { safeClone } from "@/utils/safeClone";
 import {
   Tooltip,
@@ -549,6 +562,7 @@ import {
   PlayIcon,
   Save,
   KeyboardIcon,
+  Combine,
 } from "lucide-vue-next";
 import type { Match } from "@/types/core/espanso.types";
 import {
@@ -631,6 +645,13 @@ const store = useEspansoStore();
 const userPreferences = useUserPreferences();
 const formStore = useFormStore();
 const choicesOpen = ref(false);
+const mergeOpen = ref(false);
+const mergePresetIds = computed(() => (props.rule ? [props.rule.id] : []));
+
+function openMerge() {
+  if (isSaving.value || !props.rule?.filePath) return;
+  mergeOpen.value = true;
+}
 // Map rule to formData - Use RuleFormState here
 const mapRuleToFormData = (rule: Match | null): RuleFormState => {
   if (!rule) {
@@ -1738,7 +1759,7 @@ const autoSave = async (options: { showToast?: boolean } = {}) => {
   // showToast=false 代表失焦/控件变化触发的隐式自动保存；用户关闭自动保存时应直接跳过。
   // showToast=true 通常来自显式“保存”操作，仍然允许执行。
   const showToast = options.showToast !== false;
-  if (choicesOpen.value || isSaving.value) return;
+  if (choicesOpen.value || mergeOpen.value || isSaving.value) return;
   if (!showToast && !userPreferences.preferences.autoSave) {
     return;
   }
@@ -1811,6 +1832,16 @@ function handleChoicesSaved(match: Match) {
   emit("save-success");
 }
 
+// 合并会重写被合并片段的触发词与标签；当前片段在列表中时刷新编辑器基线
+function handleMergeSaved(matches: Match[]) {
+  const saved = matches.find((match) => match.id === props.rule?.id);
+  if (!saved) return;
+  formStore.deleteFormData(saved.id);
+  resetModifiedState(saved);
+  emit("modified", false);
+  emit("save-success");
+}
+
 // --- defineExpose 블록 ---
 defineExpose({
   showPreview,
@@ -1861,6 +1892,19 @@ watch(
     });
   }
   // No deep: true needed if only watching ID
+);
+
+// 同一片段被外部改写（合并片段 / 多选方案 / 撤销重做）时 store 会换掉 match 对象：
+// 表单若还留着旧的触发词，下一次自动保存就会把合并结果覆盖回去，这里同步刷新基线。
+watch(
+  () => props.rule,
+  (newRule, oldRule) => {
+    if (!newRule || !oldRule || newRule.id !== oldRule.id) return;
+    if (!isInitialized.value || isFormModified.value || isSaving.value) return;
+    if (JSON.stringify(mapRuleToFormData(newRule)) === JSON.stringify(mapRuleToFormData(oldRule))) return;
+    console.log("[RuleEditForm] 检测到同一片段被外部修改，刷新表单基线");
+    resetModifiedState(newRule);
+  }
 );
 
 // onMounted with FormStore check

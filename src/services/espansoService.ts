@@ -1,6 +1,7 @@
 import * as platformService from './platformService'; // 用于文件系统操作
 import * as yamlService from './yamlService';         // 用于 YAML 解析/序列化
 import * as workspaceService from './workspaceService';     // 用于获取配置路径等
+import { scheduleEspansoReload } from './espansoReloadService'; // 写入成功后按需自动重载 Espanso
 
 // 核心类型 (假设已移至 types/core/)
 import type { Match } from '@/types/core/espanso.types';
@@ -94,7 +95,8 @@ export const loadConfiguration = async (configDir: string): Promise<{
         // 并行构建目录树。Promise.all 保持输入顺序，同时避免逐文件串行 IPC/读取。
         const processNode = async (fsNode: FileSystemNode, basePathParts: string[]): Promise<ConfigTreeNode | null> => {
             const isConfigFile = (name: string) => /\.(yml|yaml)$/i.test(name) && !name.startsWith('_');
-            const currentPath = await joinPath(...basePathParts, fsNode.name);
+            // Rust 扫描结果已带完整路径（同样由 PathBuf 拼接），直接使用可省去每个节点一次 join_path IPC
+            const currentPath = fsNode.path || await joinPath(...basePathParts, fsNode.name);
 
             if (fsNode.type === 'file') {
                 if (!isConfigFile(fsNode.name)) return null;
@@ -262,13 +264,18 @@ export function saveConfigurationFiles(files: ConfigurationWrite[]): Promise<voi
         if (new Set(writes.map(file => file.filePath)).size !== writes.length) throw new Error('Duplicate configuration write');
         const originals = new Map<string, string | null>();
         for (const file of writes) {
+            const original = await platformService.fileExists(file.filePath) ? await platformService.readFile(file.filePath) : null;
+            originals.set(file.filePath, original);
+            // 内容未变化：跳过校验、备份与写入，避免刷新文件时间戳触发 Espanso 重新加载
+            if (original === file.content) continue;
             await workspaceService.validateYamlText(file.content);
-            originals.set(file.filePath, await platformService.fileExists(file.filePath) ? await platformService.readFile(file.filePath) : null);
-            await workspaceService.backupFile(file.filePath);
+            // 复用刚读到的原文做备份，省去一次存在性检查和一次重复读取
+            await workspaceService.backupFile(file.filePath, original);
         }
         const completed: string[] = [];
         try {
             for (const file of writes) {
+                if (originals.get(file.filePath) === file.content) continue;
                 await platformService.writeFile(file.filePath, file.content);
                 completed.push(file.filePath);
             }
@@ -286,9 +293,12 @@ export function saveConfigurationFiles(files: ConfigurationWrite[]): Promise<voi
             const message = cause instanceof Error ? cause.message : String(cause);
             throw new Error(failures.length ? `${message}; rollback failed: ${failures.join('; ')}` : message);
         }
+        return completed.length > 0;
     });
-    saveQueue = save.catch(() => {});
-    return save;
+    saveQueue = save.then(() => {}, () => {});
+    // 片段文件全部写入成功后，按偏好防抖触发 Espanso 重载；失败只影响通知，不影响写入结果。
+    void save.then(wrote => { if (wrote) scheduleEspansoReload(); }).catch(() => {});
+    return save.then(() => undefined);
 }
 
 export function saveConfigurationFile(filePath: string, itemsToSave: Match[], existingYamlData: YamlData = {}): Promise<void> {
@@ -308,6 +318,7 @@ export const saveGlobalConfig = async (filePath: string, configData: GlobalConfi
         await workspaceService.validateYamlText(yamlContent);
         await workspaceService.backupFile(filePath);
         await platformService.writeFile(filePath, yamlContent);
+        scheduleEspansoReload();
         console.log(`[EspansoService] 全局配置保存成功: ${filePath}`);
     } catch (err: any) {
         console.error(`[EspansoService] 保存全局配置 ${filePath} 失败: ${err.message}`);
@@ -358,6 +369,7 @@ export const createAndSaveEmptyConfigFile = async (folderPath: string, fileName:
 
         console.log(`[EspansoService] 写入新文件: ${newFilePath}`);
         await platformService.writeFile(newFilePath, yamlContent);
+        scheduleEspansoReload();
 
         console.log(`[EspansoService] 新配置文件创建成功: ${newFilePath}`);
         return newFilePath; // 返回新文件的路径

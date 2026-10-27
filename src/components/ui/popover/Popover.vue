@@ -3,17 +3,17 @@
     <slot name="trigger" :open="() => (isOpen = true)" :close="() => (isOpen = false)" :toggle="toggle"></slot>
     <Teleport to="body">
       <Transition
-        enter-active-class="transition duration-200 ease-out"
+        enter-active-class="transition duration-150 ease-out"
         enter-from-class="opacity-0 translate-y-1"
         enter-to-class="opacity-100 translate-y-0"
-        leave-active-class="transition duration-150 ease-in"
+        leave-active-class="transition duration-100 ease-in"
         leave-from-class="opacity-100 translate-y-0"
         leave-to-class="opacity-0 translate-y-1"
       >
         <div
           v-if="isOpen"
           ref="popoverRef"
-          class="fixed z-[9999] min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md animate-in fade-in-80 data-[side=bottom]:slide-in-from-top-1 data-[side=left]:slide-in-from-right-1 data-[side=right]:slide-in-from-left-1 data-[side=top]:slide-in-from-bottom-1"
+          class="fixed z-[9999] min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
           :style="popoverStyle"
         >
           <slot></slot>

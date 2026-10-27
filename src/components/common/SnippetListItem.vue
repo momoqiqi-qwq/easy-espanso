@@ -1,7 +1,7 @@
 <template>
   <div
     :class="[
-      'group cursor-pointer border-l-2 rounded-md mb-2.5 transition-all bg-card shadow-xs border border-border/30',
+      'group cursor-pointer border-l-2 rounded-md mb-2.5 transition-[background-color,border-color,box-shadow] duration-150 bg-card shadow-xs border border-border/30',
       selected
         ? 'border-l-primary shadow-sm bg-accent/10 border-primary/20'
         : 'border-l-transparent hover:border-l-primary/40 hover:shadow-sm hover:bg-accent/5 hover:border-border/60',

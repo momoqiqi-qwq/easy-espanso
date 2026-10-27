@@ -3,6 +3,7 @@ import * as yamlService from './yamlService';
 import type { Match } from '@/types/core/espanso.types';
 import type { EspansoMatchYaml } from '@/types/core/espanso-format.types';
 import { cleanMatchForSaving, processMatch } from '@/utils/espansoDataUtils';
+import { scheduleEspansoReload } from './espansoReloadService'; // 应用专属配置写入后按需自动重载 Espanso
 
 export type AppFilterType = 'filter_exec' | 'filter_class' | 'filter_title';
 export interface AppSpecificConfig {
@@ -109,6 +110,7 @@ export async function saveAppOnlySnippets(
   const text = await yamlService.serializeYaml(existing);
   await yamlService.parseYaml(text);
   await platformService.writeFile(path, text);
+  scheduleEspansoReload();
   return reference;
 }
 
@@ -120,6 +122,7 @@ export async function deleteAppOnlySnippetFile(
   if (!existing) return;
   const { path } = await resolveManagedMatchPath(configRoot, item);
   if (await platformService.fileExists(path)) await platformService.deleteFile(path);
+  scheduleEspansoReload();
 }
 
 export async function saveAppSpecificConfig(configRoot: string, item: AppSpecificConfig): Promise<string> {
@@ -135,6 +138,7 @@ export async function saveAppSpecificConfig(configRoot: string, item: AppSpecifi
   const text = await yamlService.serializeYaml(data);
   await yamlService.parseYaml(text);
   await platformService.writeFile(path, text);
+  scheduleEspansoReload();
   return path;
 }
 
@@ -180,5 +184,6 @@ export async function syncAppOnlyMatchExcludes(configRoot: string): Promise<void
   const next = [...new Set([...keepUserValues, ...nextManaged])];
   if (next.length) raw.extra_excludes = next; else delete raw.extra_excludes;
   await platformService.writeFile(defaultPath, await yamlService.serializeYaml(raw));
+  scheduleEspansoReload();
   await platformService.writeFile(managedStatePath, JSON.stringify(nextManaged, null, 2));
 }

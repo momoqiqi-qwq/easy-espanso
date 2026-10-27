@@ -94,6 +94,16 @@ onErrorCaptured((err, _instance, _info) => {
   width: 100%;
 }
 
+/* 切换页面时新页面轻微淡入（只动 opacity：不用 transform，避免页面里 fixed 元素在动画期间错位） */
+.component-wrapper > :deep(*) {
+  animation: route-fade-in var(--motion-base, 180ms) var(--motion-ease-out, ease-out);
+}
+
+@keyframes route-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 .loading-view, .error-view {
   height: 100%;
   display: flex;
@@ -102,7 +112,8 @@ onErrorCaptured((err, _instance, _info) => {
   justify-content: center;
   padding: 2rem;
   text-align: center;
-  animation: fade-in 0.5s ease-in-out;
+  /* 页面通常很快就加载完：延迟 150ms 再淡入，避免加载提示一闪而过 */
+  animation: fade-in 200ms ease-out 150ms both;
 }
 
 .error-view {

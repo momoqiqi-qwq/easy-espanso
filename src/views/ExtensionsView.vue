@@ -95,7 +95,7 @@
           <h2 class="text-sm font-medium mb-2">{{ t('extensions.templates.title') }}</h2>
           <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
             <button v-for="tpl in templates" :key="tpl.key" type="button"
-              class="text-left p-3 rounded-md border border-border/30 bg-card shadow-xs hover:border-primary/40 hover:bg-accent/5 transition-all"
+              class="text-left p-3 rounded-md border border-border/30 bg-card shadow-xs hover:border-primary/40 hover:bg-accent/5 transition-[background-color,border-color,box-shadow] duration-150"
               @click="applyTemplate(tpl)">
               <div class="text-sm font-medium">{{ t(tpl.nameKey) }}</div>
               <div class="text-xs text-muted-foreground mt-1">{{ t(tpl.descKey) }}</div>

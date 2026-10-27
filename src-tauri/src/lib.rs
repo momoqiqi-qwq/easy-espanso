@@ -103,40 +103,59 @@ async fn export_espanso_backup(request: BackupRequest) -> Result<String, String>
     Ok(path_string(&target))
 }
 
+/// 用备份目录替换目标目录：先把备份完整复制到暂存区，复制成功后再交换。
+/// 原实现先 remove_dir_all 再复制，复制中途失败（磁盘满、文件被占用）会让用户配置只剩一半。
+/// 暂存区放在配置根目录下（与目标同盘，rename 是原子的；Espanso 只读取 config/ 与 match/，不会加载暂存文件）。
+fn replace_dir_with_copy(source: &Path, target: &Path, staging_root: &Path, label: &str) -> Result<(), String> {
+    let staged = staging_root.join(format!("new-{label}"));
+    let old = staging_root.join(format!("old-{label}"));
+    if let Err(e) = copy_dir_recursive(source, &staged) {
+        let _ = fs::remove_dir_all(&staged);
+        return Err(e);
+    }
+    if let Some(parent) = target.parent() { fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
+    let had_target = target.exists();
+    if had_target {
+        if let Err(e) = fs::rename(target, &old) {
+            let _ = fs::remove_dir_all(&staged);
+            return Err(format!("无法替换 {}: {e}", path_string(target)));
+        }
+    }
+    if let Err(e) = fs::rename(&staged, target) {
+        if had_target { let _ = fs::rename(&old, target); }
+        let _ = fs::remove_dir_all(&staged);
+        return Err(format!("无法替换 {}: {e}", path_string(target)));
+    }
+    if had_target { let _ = fs::remove_dir_all(&old); }
+    Ok(())
+}
+
 #[tauri::command]
 async fn import_espanso_backup(request: RestoreRequest) -> Result<(), String> {
     let backup = PathBuf::from(request.backup_root);
     let target = PathBuf::from(request.target_root);
     if !backup.is_dir() { return Err("Backup folder does not exist".into()); }
     fs::create_dir_all(&target).map_err(|e| e.to_string())?;
-    for name in ["config", "packages"] {
-        let src = backup.join(name);
-        if src.exists() {
-            let dst = target.join(name);
-            if dst.exists() { fs::remove_dir_all(&dst).map_err(|e| e.to_string())?; }
-            copy_dir_recursive(&src, &dst)?;
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+    let staging = target.join(format!(".easy-espanso-restore-{stamp}"));
+    let result = (|| -> Result<(), String> {
+        for name in ["config", "packages"] {
+            let src = backup.join(name);
+            if src.exists() { replace_dir_with_copy(&src, &target.join(name), &staging, name)?; }
         }
-    }
-    if !request.preserve_matches {
-        let src = backup.join("match");
-        if src.exists() {
-            let dst = target.join("match");
-            if dst.exists() { fs::remove_dir_all(&dst).map_err(|e| e.to_string())?; }
-            copy_dir_recursive(&src, &dst)?;
+        if !request.preserve_matches {
+            let src = backup.join("match");
+            if src.exists() { replace_dir_with_copy(&src, &target.join("match"), &staging, "match")?; }
+        } else {
+            // Espanso packages live under match/packages. Preserve the user's normal
+            // match files while still restoring package backups.
+            let src = backup.join("match").join("packages");
+            if src.exists() { replace_dir_with_copy(&src, &target.join("match").join("packages"), &staging, "match-packages")?; }
         }
-    } else {
-        // Espanso packages live under match/packages. Preserve the user's normal
-        // match files while still restoring package backups.
-        let src = backup.join("match").join("packages");
-        if src.exists() {
-            let match_dst = target.join("match");
-            fs::create_dir_all(&match_dst).map_err(|e| e.to_string())?;
-            let dst = match_dst.join("packages");
-            if dst.exists() { fs::remove_dir_all(&dst).map_err(|e| e.to_string())?; }
-            copy_dir_recursive(&src, &dst)?;
-        }
-    }
-    Ok(())
+        Ok(())
+    })();
+    let _ = fs::remove_dir_all(&staging);
+    result
 }
 
 fn child_command<S: AsRef<std::ffi::OsStr>>(program: S) -> Command {
@@ -294,17 +313,6 @@ fn get_environment_variable(name: String) -> Option<String> {
     env::var(name).ok()
 }
 
-#[tauri::command]
-fn parse_yaml(content: String) -> Result<Value, String> {
-    let yaml: serde_yaml::Value = serde_yaml::from_str(&content).map_err(|e| e.to_string())?;
-    serde_json::to_value(yaml).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn serialize_yaml(data: Value) -> Result<String, String> {
-    serde_yaml::to_string(&data).map_err(|e| e.to_string())
-}
-
 fn is_existing_file(path: &Path) -> bool { path.is_file() }
 
 fn common_espanso_paths() -> Vec<PathBuf> {
@@ -377,7 +385,8 @@ fn resolve_espanso(custom_path: &str) -> Option<(PathBuf, String)> {
     let candidates = path_espanso_candidates()
         .into_iter()
         .map(|p| (p, "path"))
-        .chain(system_espanso_candidates().into_iter().map(|p| (p, "system-command")))
+        // 惰性调用：PATH 里已找到时不再额外启动 where.exe/which 子进程
+        .chain(std::iter::once(()).flat_map(|_| system_espanso_candidates()).map(|p| (p, "system-command")))
         .chain(common_espanso_paths().into_iter().map(|p| (p, "common")));
 
     for (path, source) in candidates {
@@ -402,8 +411,14 @@ async fn get_espanso_status(custom_executable_path: Option<String>) -> EspansoRu
     let Some((path, source)) = resolve_espanso(&custom) else {
         return EspansoRuntimeStatus { installed: false, running: false, state: "not-found".into(), executable_path: None, source: None, version: String::new(), message: "Espanso executable was not found.".into() };
     };
-    let version = run_espanso(&path, "--version").ok().map(|(o,e,_)| combined_output(o,e).lines().next().unwrap_or("").to_string()).unwrap_or_default();
-    match run_espanso(&path, "status") {
+    // --version 与 status 互不依赖，并行执行，状态查询耗时约减半
+    let (version_result, status_result) = std::thread::scope(|scope| {
+        let version = scope.spawn(|| run_espanso(&path, "--version"));
+        let status = run_espanso(&path, "status");
+        (version.join().unwrap_or_else(|_| Err("espanso --version panicked".into())), status)
+    });
+    let version = version_result.ok().map(|(o,e,_)| combined_output(o,e).lines().next().unwrap_or("").to_string()).unwrap_or_default();
+    match status_result {
         Ok((out, err, success)) => {
             let message = combined_output(out, err);
             let lower = message.to_ascii_lowercase();
@@ -463,31 +478,6 @@ fn b64_encode(data: &[u8]) -> String {
         out.push(if chunk.len() > 2 { B64_ALPHABET[n as usize & 63] as char } else { '=' });
     }
     out
-}
-
-fn b64_decode(data: &str) -> Option<Vec<u8>> {
-    fn val(c: u8) -> Option<u32> {
-        match c {
-            b'A'..=b'Z' => Some((c - b'A') as u32),
-            b'a'..=b'z' => Some((c - b'a') as u32 + 26),
-            b'0'..=b'9' => Some((c - b'0') as u32 + 52),
-            b'+' => Some(62),
-            b'/' => Some(63),
-            _ => None,
-        }
-    }
-    let clean: Vec<u8> = data.bytes().filter(|b| !b.is_ascii_whitespace() && *b != b'=').collect();
-    let mut out = Vec::with_capacity(clean.len() / 4 * 3);
-    for chunk in clean.chunks(4) {
-        let mut n: u32 = 0;
-        for (i, c) in chunk.iter().enumerate() {
-            n |= val(*c)? << (18 - 6 * i);
-        }
-        out.push((n >> 16) as u8);
-        if chunk.len() > 2 { out.push((n >> 8) as u8); }
-        if chunk.len() > 3 { out.push(n as u8); }
-    }
-    Some(out)
 }
 
 /// FNV-1a，用作图标缓存文件名
@@ -644,7 +634,9 @@ fn resolve_exe_path(executable: &str) -> Option<String> {
         }
 
         // 6. UWP/商店应用（如 WindowsTerminal）：按包名匹配安装目录（耗时一次性，结果落盘缓存）
-        if let Some(stem) = name.to_lowercase().strip_suffix(".exe") {
+        // exe 名来自配置文件，会被拼进 PowerShell 脚本：只允许安全字符，杜绝命令注入（如 a';calc;'.exe）
+        let ps_safe = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+        if let Some(stem) = name.to_lowercase().strip_suffix(".exe").filter(|stem| ps_safe(*stem) && ps_safe(&name)) {
             let ps = format!(
                 "Get-AppxPackage *{}* | ForEach-Object {{ $c1 = Join-Path $_.InstallLocation '{}'; $c2 = Join-Path $_.InstallLocation ($_.PackageFamilyName + '.exe'); if (Test-Path $c1) {{ $c1 }} elseif (Test-Path $c2) {{ $c2 }} }}",
                 stem, name
@@ -684,7 +676,7 @@ fn find_exe_in_trees(name: &str, roots: &[PathBuf]) -> Option<String> {
 }
 
 #[cfg(target_os = "windows")]
-fn extract_icon_bmp_data_url(full_path: &str) -> Result<String, String> {
+fn extract_icon_bmp(full_path: &str) -> Result<Vec<u8>, String> {
     use windows_sys::Win32::Graphics::Gdi::{
         CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, GetDIBits, GetObjectW, ReleaseDC,
         BITMAP, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, HBITMAP,
@@ -703,7 +695,7 @@ fn extract_icon_bmp_data_url(full_path: &str) -> Result<String, String> {
         }
 
         let mut info: ICONINFO = std::mem::zeroed();
-        let result = (|| -> Result<String, String> {
+        let result = (|| -> Result<Vec<u8>, String> {
             if GetIconInfo(hicon as _, &mut info) == 0 {
                 return Err("GetIconInfo 失败".into());
             }
@@ -718,8 +710,7 @@ fn extract_icon_bmp_data_url(full_path: &str) -> Result<String, String> {
                 &mut bmp_meta as *mut _ as *mut _,
             ) == 0
             {
-                DeleteObject(color_bmp);
-                if !info.hbmMask.is_null() && info.hbmMask != color_bmp { DeleteObject(info.hbmMask); }
+                // 位图句柄统一由闭包外的清理代码释放；这里再删一次会重复释放 GDI 句柄
                 return Err("GetObject 失败".into());
             }
             let w = bmp_meta.bmWidth;
@@ -752,8 +743,6 @@ fn extract_icon_bmp_data_url(full_path: &str) -> Result<String, String> {
             DeleteDC(hdc_mem);
             ReleaseDC(std::ptr::null_mut(), hdc_screen);
             if got == 0 {
-                DeleteObject(color_bmp);
-                if !info.hbmMask.is_null() && info.hbmMask != color_bmp { DeleteObject(info.hbmMask); }
                 return Err("GetDIBits 失败".into());
             }
 
@@ -784,7 +773,7 @@ fn extract_icon_bmp_data_url(full_path: &str) -> Result<String, String> {
             bmp.extend_from_slice(&0u32.to_le_bytes());
             bmp.extend_from_slice(&0u32.to_le_bytes());
             bmp.extend_from_slice(&pixels);
-            Ok(format!("data:image/bmp;base64,{}", b64_encode(&bmp)))
+            Ok(bmp)
         })();
 
         if !info.hbmColor.is_null() { DeleteObject(info.hbmColor); }
@@ -795,7 +784,7 @@ fn extract_icon_bmp_data_url(full_path: &str) -> Result<String, String> {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn extract_icon_bmp_data_url(_full_path: &str) -> Result<String, String> {
+fn extract_icon_bmp(_full_path: &str) -> Result<Vec<u8>, String> {
     Err("仅支持 Windows".into())
 }
 
@@ -822,8 +811,16 @@ async fn get_app_icon_base64(executable: String) -> Result<String, String> {
             return Ok(format!("data:image/bmp;base64,{}", b64_encode(&bytes)));
         }
     }
-    // 之前解析失败的不再重复尝试（开销大的 PowerShell/注册表查询）
-    if miss_file.exists() {
+    // 之前解析失败的 24 小时内不再重复尝试（开销大的 PowerShell/注册表查询）；
+    // 过期后重试，用户后来安装的程序也能显示图标
+    const MISS_TTL: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+    let miss_fresh = fs::metadata(&miss_file)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|time| time.elapsed().ok())
+        .map(|age| age < MISS_TTL)
+        .unwrap_or(false);
+    if miss_fresh {
         return Err("未找到可执行文件".into());
     }
 
@@ -834,17 +831,11 @@ async fn get_app_icon_base64(executable: String) -> Result<String, String> {
     };
     let full_path = full_path.trim_matches('"').to_string();
 
-    match extract_icon_bmp_data_url(&full_path) {
-        Ok(data_url) => {
-            if let Some(b64) = data_url.strip_prefix("data:image/bmp;base64,") {
-                if let Some(bytes) = b64_decode(b64) {
-                    let _ = fs::write(&cache_file, bytes);
-                }
-            }
-            Ok(data_url)
-        }
-        Err(e) => Err(e),
-    }
+    let _ = fs::remove_file(&miss_file);
+    // 直接缓存位图字节，不再经过 data URL → base64 解码的往返
+    let bytes = extract_icon_bmp(&full_path)?;
+    let _ = fs::write(&cache_file, &bytes);
+    Ok(format!("data:image/bmp;base64,{}", b64_encode(&bytes)))
 }
 
 /// 读取鼠标位置下方窗口所属进程的完整可执行路径。
@@ -1016,6 +1007,14 @@ async fn download_update_asset_impl(url: &str, file_name: &str) -> Result<PathBu
     if !url.starts_with(UPDATE_ASSET_PREFIX) {
         return Err("更新地址不在受信任的发布范围内".into());
     }
+    // 前缀之后只允许「标签/文件名」：拒绝 ..、编码绕过、查询串等，防止跳出本仓库的发布目录
+    let rest = &url[UPDATE_ASSET_PREFIX.len()..];
+    let lower = rest.to_ascii_lowercase();
+    if rest.split('/').any(|seg| seg.is_empty() || seg == "." || seg == "..")
+        || ["\\", "?", "#", "@", "%2e", "%2f", "%5c"].iter().any(|bad| lower.contains(bad))
+    {
+        return Err("更新地址不在受信任的发布范围内".into());
+    }
     let safe_name = Path::new(file_name)
         .file_name()
         .and_then(|name| name.to_str())
@@ -1036,7 +1035,12 @@ async fn download_update_asset_impl(url: &str, file_name: &str) -> Result<PathBu
     if bytes.is_empty() {
         return Err("下载到的更新包为空".into());
     }
-    fs::write(&target, &bytes).map_err(|e| format!("写入更新包失败: {e}"))?;
+    // 先写临时文件再改名：下载/写入中断时不会留下一个截断却能被执行的安装包
+    let partial = dir.join(format!("{safe_name}.part"));
+    if let Err(e) = fs::write(&partial, &bytes).and_then(|_| fs::rename(&partial, &target)) {
+        let _ = fs::remove_file(&partial);
+        return Err(format!("写入更新包失败: {e}"));
+    }
     Ok(target)
 }
 
@@ -1179,13 +1183,39 @@ pub fn run() {
             read_file, write_file, file_exists, directory_exists, create_directory,
             list_files, scan_directory, delete_file, delete_directory,
             rename_file_or_directory, join_path, get_platform, get_environment_variable,
-            parse_yaml, serialize_yaml, get_espanso_status, control_espanso, open_in_explorer,
+            get_espanso_status, control_espanso, open_in_explorer,
             get_executable_under_cursor, start_cursor_probe, stop_cursor_probe,
             export_espanso_backup, import_espanso_backup,
             get_app_icon_base64, get_latest_release, download_update_asset, install_update_and_restart
         ])
         .run(tauri::generate_context!())
         .expect("error while running Easy Espanso");
+}
+
+#[cfg(test)]
+mod restore_tests {
+    use super::*;
+
+    #[test]
+    fn replace_dir_swaps_in_full_copy_and_cleans_staging() {
+        let root = env::temp_dir().join(format!("ee-restore-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let backup = root.join("backup").join("config");
+        fs::create_dir_all(backup.join("sub")).unwrap();
+        fs::write(backup.join("default.yml"), "new").unwrap();
+        fs::write(backup.join("sub").join("x.yml"), "x").unwrap();
+        let target = root.join("live").join("config");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("default.yml"), "old").unwrap();
+        fs::write(target.join("stale.yml"), "stale").unwrap();
+        let staging = root.join("live").join(".staging");
+        replace_dir_with_copy(&backup, &target, &staging, "config").unwrap();
+        assert_eq!(fs::read_to_string(target.join("default.yml")).unwrap(), "new");
+        assert_eq!(fs::read_to_string(target.join("sub").join("x.yml")).unwrap(), "x");
+        assert!(!target.join("stale.yml").exists());
+        assert!(!staging.join("old-config").exists() && !staging.join("new-config").exists());
+        let _ = fs::remove_dir_all(&root);
+    }
 }
 
 #[cfg(test)]
@@ -1238,6 +1268,11 @@ mod update_tests {
             &format!("{UPDATE_ASSET_PREFIX}v1.3.0/payload.txt"), "payload.txt")).is_err());
         assert!(tauri::async_runtime::block_on(download_update_asset_impl(
             &format!("{UPDATE_ASSET_PREFIX}v1.3.0/../../evil.exe"), "evil.exe")).is_err());
+        for bad in ["v1.3.0/%2e%2e/evil.exe", "v1.3.0//evil.exe", "v1.3.0/a.exe?x=1", "v1.3.0/a.exe#x", "v1.3.0\\..\\a.exe"] {
+            let url = format!("{UPDATE_ASSET_PREFIX}{bad}");
+            let err = tauri::async_runtime::block_on(download_update_asset_impl(&url, "a.exe")).unwrap_err();
+            assert!(err.contains("受信任"), "{bad} should be rejected before any network request, got: {err}");
+        }
         assert!(resolve_update_package("C:/Windows/System32/notepad.exe").is_err());
         assert!(resolve_update_package("C:/definitely/missing/setup.exe").is_err());
     }

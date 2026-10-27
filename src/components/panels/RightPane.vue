@@ -445,48 +445,19 @@ onUnmounted(() => {
 // const mapContentToMatchFields = (...) => { ... } // 移除
 // const cancelEdit = () => { ... } // 这个逻辑现在由表单内部处理或直接调用 store.selectItem(null, null)
 
+// 外部改写（合并片段 / 多选方案）后，把表单基线同步到磁盘上的最新内容
+const syncAfterExternalEdit = (matches: Match[]) => {
+  const saved = matches.find(match => match.id === store.state.selectedItemId);
+  if (saved) ruleFormRef.value?.resetModifiedState(saved);
+};
+
 // 暴露给父组件的方法 (如果需要)
 defineExpose({
-  middlePaneRef // 暴露给 MainLayout 以便传递
+  middlePaneRef, // 暴露给 MainLayout 以便传递
+  syncAfterExternalEdit,
 });
 
 </script>
-
-<style>
-/* 渐隐动画 */
-@keyframes fadeOut {
-  0% {
-    opacity: 1;
-  }
-  70% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 0;
-  }
-}
-
-.animate-fade-out {
-  animation: fadeOut 2s ease-out forwards;
-}
-
-/* 慢速脉冲动画 */
-@keyframes pulseSlow {
-  0% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.5;
-  }
-  100% {
-    opacity: 1;
-  }
-}
-
-.animate-pulse-slow {
-  animation: pulseSlow 2s infinite;
-}
-</style>
 
 <style scoped> /* 使用 scoped 防止样式污染 */
 .fade-enter-active,
@@ -500,7 +471,7 @@ defineExpose({
 
 /* 保存按钮状态变化样式 */
 .btn-save {
-  transition: all 0.3s ease;
+  transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease;
 }
 .btn-save.success {
   background-color: rgba(34, 197, 94, 0.1);
@@ -511,19 +482,7 @@ defineExpose({
   border-color: rgb(239, 68, 68);
 }
 
-/* 添加自定义的慢速脉冲动画 */
-@keyframes pulse-slow {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.5;
-  }
-}
-
-.animate-pulse-slow {
-  animation: pulse-slow 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-}
+/* 「未保存」脉冲、「已保存」渐隐统一定义在 tailwind.config.js（animate-pulse-slow / animate-saved-fade） */
 
 /* 可以在这里添加 RightPane 特有的样式 */
 </style>

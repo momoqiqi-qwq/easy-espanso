@@ -42,12 +42,54 @@ export function withChoiceContent(match: Match, contentType: ContentType, conten
   return next;
 }
 
+/** Union of every snippet's triggers, first-seen order, duplicates dropped. */
+export function unionTriggers(matches: Pick<Match, 'trigger' | 'triggers'>[]): string[] {
+  return [...new Set(matches.flatMap(match => matchTriggers(match)))];
+}
+
+/** Give a snippet the shared trigger set, keeping only the matching representation. */
+export function withTriggers(match: Match, triggers: string[]): Match {
+  const next: Match = { ...match };
+  if (triggers.length === 1) {
+    next.trigger = triggers[0];
+    delete next.triggers;
+  } else {
+    next.triggers = [...triggers];
+    delete next.trigger;
+  }
+  return next;
+}
+
+/**
+ * Merge snippets into one choice group: the keywords are unioned into a shared trigger set
+ * while every snippet keeps its own content and becomes one option, labelled with its own
+ * name (falling back to the keyword it was created from).
+ */
+export function toChoiceGroup(matches: Match[], triggers: string[]): Match[] {
+  return matches.map(match => {
+    const next = withTriggers(match, triggers);
+    next.label = (match.label || '').trim() || matchTriggers(match)[0] || '';
+    return next;
+  });
+}
+
 /** Keep other snippets in their original relative order, placing the group at its first row. */
 export function replaceVariants(matches: Match[], originalIds: string[], variants: Match[]): Match[] {
   const ids = new Set(originalIds);
-  const first = matches.findIndex(match => ids.has(match.id));
-  if (first < 0 || originalIds.some(id => !matches.some(match => match.id === id))) throw new Error('Choice group has changed');
-  const remaining = matches.filter(match => !ids.has(match.id));
+  const foundIds = new Set<string>();
+  const remaining: Match[] = [];
+  let first = -1;
+  // Validate the selection while collecting untouched rows, without scanning the file once per ID.
+  for (const match of matches) {
+    const id = match.id;
+    if (ids.has(id)) {
+      if (first < 0) first = remaining.length;
+      foundIds.add(id);
+    } else {
+      remaining.push(match);
+    }
+  }
+  if (first < 0 || foundIds.size !== ids.size) throw new Error('Choice group has changed');
   remaining.splice(first, 0, ...variants);
   return remaining.map((match, index) => ({ ...match, guiOrder: index + 1 }));
 }

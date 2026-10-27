@@ -34,10 +34,16 @@ export async function validateYamlText(text: string): Promise<void> {
   await parseYaml(text);
 }
 
-export async function backupFile(filePath: string): Promise<string | null> {
+/**
+ * 写入前备份原文件。knownContent 为调用方已读到的原文（null 表示文件不存在），
+ * 传入时直接复用，省去一次存在性检查和一次读文件。
+ */
+export async function backupFile(filePath: string, knownContent?: string | null): Promise<string | null> {
   if (!isBackupBeforeSaveEnabled()) return null;
-  if (!(await platformService.fileExists(filePath))) return null;
-  const original = await platformService.readFile(filePath);
+  const original = knownContent !== undefined
+    ? knownContent
+    : (await platformService.fileExists(filePath) ? await platformService.readFile(filePath) : null);
+  if (original === null) return null;
   const backupPath = `${filePath}.easy-espanso.bak`;
   await platformService.writeFile(backupPath, original);
   return backupPath;

@@ -9,6 +9,7 @@
       <MiddlePane 
         ref="middlePaneRef" 
         class="middle-pane overflow-y-auto border-r border-border bg-muted"
+        @merge-saved="handleMergeSaved"
       />
       <RightPane 
         ref="rightPaneRef" 
@@ -24,10 +25,17 @@
 import { ref, onMounted } from 'vue';
 import MiddlePane from '../panels/MiddlePane.vue';
 import RightPane from '../panels/RightPane.vue';
+import type { Match } from '@/types/core/espanso.types';
 
 // 引用组件实例
 const middlePaneRef = ref<InstanceType<typeof MiddlePane> | null>(null);
 const rightPaneRef = ref<InstanceType<typeof RightPane> | null>(null);
+
+// 合并片段会重写共用触发词：让右侧表单丢掉过期基线，
+// 否则它手里的旧触发词会被下一次自动保存覆盖回磁盘
+const handleMergeSaved = (matches: Match[]) => {
+  rightPaneRef.value?.syncAfterExternalEdit(matches);
+};
 
 // 在组件挂载后建立引用关系
 onMounted(() => {

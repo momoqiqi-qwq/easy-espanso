@@ -52,10 +52,13 @@ export interface UserPreferences {
   extensionSort: 'source' | 'trigger' | 'label';
   extensionRowHeight: number;
   extensionAutoSaveDelay: number;
+  /** 片段/配置文件写入后是否自动重启 Espanso 服务，让改动立即生效。 */
+  autoReloadEspanso: boolean;
 }
 
 const DEFAULT_PREFERENCES: UserPreferences = {
   hideUnsavedChangesWarning: false,
+  autoReloadEspanso: false,
   interfaceDensity: 'comfortable',
   reduceMotion: false,
   rememberTreeState: true,
@@ -101,6 +104,7 @@ export const useUserPreferences = defineStore('userPreferences', () => {
     if (![28, 34, 42].includes(merged.extensionRowHeight)) merged.extensionRowHeight = 34;
     if (![300, 600, 1200, 2000].includes(merged.extensionAutoSaveDelay)) merged.extensionAutoSaveDelay = 600;
     if (typeof merged.checkUpdatesOnStartup !== 'boolean') merged.checkUpdatesOnStartup = true;
+    if (typeof merged.autoReloadEspanso !== 'boolean') merged.autoReloadEspanso = DEFAULT_PREFERENCES.autoReloadEspanso;
     if (typeof merged.skippedUpdateVersion !== 'string') merged.skippedUpdateVersion = '';
     if (![90, 100, 110, 125, 150].includes(merged.fontScale)) merged.fontScale = DEFAULT_PREFERENCES.fontScale;
     if (!['blue', 'violet', 'cyan', 'emerald', 'amber', 'rose'].includes(merged.accentColor)) merged.accentColor = DEFAULT_PREFERENCES.accentColor;
@@ -218,6 +222,7 @@ export const useUserPreferences = defineStore('userPreferences', () => {
       extensionSort: DEFAULT_PREFERENCES.extensionSort,
       extensionRowHeight: DEFAULT_PREFERENCES.extensionRowHeight,
       extensionAutoSaveDelay: DEFAULT_PREFERENCES.extensionAutoSaveDelay,
+      autoReloadEspanso: DEFAULT_PREFERENCES.autoReloadEspanso,
     };
     savePreferences();
     applyPreferencesToDocument();

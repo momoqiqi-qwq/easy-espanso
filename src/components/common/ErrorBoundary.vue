@@ -89,7 +89,7 @@ const navigateHome = () => {
   border-radius: 0.375rem;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background-color 150ms ease, color 150ms ease, opacity 150ms ease;
 }
 
 .retry-button {
