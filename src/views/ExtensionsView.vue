@@ -385,7 +385,7 @@ matches:
 </style>
 
 <script setup lang="ts">
-import { computed, ref, watch, onBeforeUnmount } from 'vue';
+import { computed, ref, watch, onBeforeUnmount, onMounted } from 'vue';
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { toast } from 'vue-sonner';
@@ -402,6 +402,7 @@ import {
 } from 'lucide-vue-next';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import * as platformService from '@/services/platformService';
+import { registerShutdownSaveHandler } from '@/services/shutdownSaveService';
 import ExtensionContextMenu, { type ExtensionMenuAction } from '@/components/ExtensionContextMenu.vue';
 import { useContextMenu } from '@/hooks/useContextMenu';
 import { Button } from '../components/ui/button';
@@ -677,6 +678,7 @@ let deleteConfirmTimer: ReturnType<typeof setTimeout> | null = null;
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
 let savePromise: Promise<boolean> | null = null;
 let savedForm = '';
+let unregisterShutdownSave: (() => void) | null = null;
 
 function clearAutoSaveTimer() {
   if (autoSaveTimer) clearTimeout(autoSaveTimer);
@@ -786,7 +788,16 @@ watch(form, () => {
 // 路由复用同一个组件；离开前提交旧页面的数据，避免用新页面类型构造变量。
 onBeforeRouteUpdate(async () => await saveCurrent(false, true));
 onBeforeRouteLeave(async () => await saveCurrent(false, true));
-onBeforeUnmount(clearAutoSaveTimer);
+onMounted(() => {
+  unregisterShutdownSave = registerShutdownSaveHandler(async () => {
+    await saveCurrent(false, true);
+  });
+});
+onBeforeUnmount(() => {
+  unregisterShutdownSave?.();
+  unregisterShutdownSave = null;
+  clearAutoSaveTimer();
+});
 
 // 切换页面（shell <-> script）时重置状态；两个路由共用组件
 watch(extType, () => {

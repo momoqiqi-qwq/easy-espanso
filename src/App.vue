@@ -53,7 +53,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useEspansoStore } from './store/useEspansoStore'; // 引入重构后的 Store
 import { useUserPreferences } from './store/useUserPreferences';
@@ -69,6 +69,19 @@ import { useTheme } from './hooks/useTheme'; // 正确导入useTheme
 import { checkEspansoInstalled } from '@/services/espansoInstallService'; // 导入 espanso 安装检测服务
 import EspansoInstallPrompt from '@/components/common/EspansoInstallPrompt.vue'; // 导入安装提示组件
 import { useTabKeyHandler } from './hooks/useTabKeyHandler'; // 导入 Tab 键处理钩子
+import { flushShutdownSaves } from '@/services/shutdownSaveService';
+import {
+  BACKUP_SETTINGS_CHANGED_EVENT,
+  createConfigBackup,
+  loadConfigBackupSettings,
+  type ConfigBackupSettings,
+} from '@/services/configBackupService';
+import {
+  GITHUB_BACKUP_SETTINGS_CHANGED_EVENT,
+  loadGitHubBackupSettings,
+  type GitHubBackupSettings,
+  uploadConfigBackup,
+} from '@/services/githubBackupService';
 
 // 导入 UI 组件 (保持不变)
 import { Button } from './components/ui/button'; // 导入按钮组件
@@ -91,6 +104,97 @@ console.log(`[App] Current theme: ${theme.value}`); // 使用theme变量，避�
 
 // 使用 Tab 键处理钩子，禁用右侧面板的 Tab 键默认行为
 useTabKeyHandler();
+
+let unlistenCloseRequested: (() => void) | null = null;
+let closeSaveInProgress = false;
+let scheduledBackupTimer: ReturnType<typeof setInterval> | null = null;
+let scheduledBackupBusy = false;
+const scheduledBackupSettings = ref<ConfigBackupSettings>(loadConfigBackupSettings());
+let githubBackupTimer: ReturnType<typeof setInterval> | null = null;
+let githubBackupBusy = false;
+const githubBackupSettings = ref<GitHubBackupSettings>(loadGitHubBackupSettings());
+
+const clearScheduledBackupTimer = () => {
+  if (scheduledBackupTimer) {
+    clearInterval(scheduledBackupTimer);
+    scheduledBackupTimer = null;
+  }
+};
+
+const runScheduledBackup = async () => {
+  const settings = scheduledBackupSettings.value;
+  if (scheduledBackupBusy || !settings.enabled || !settings.directory || !store.state.configRootDir) return;
+  scheduledBackupBusy = true;
+  try {
+    await createConfigBackup(store.state.configRootDir, settings.directory);
+  } catch (error) {
+    console.error('[App] 定时配置备份失败:', error);
+  } finally {
+    scheduledBackupBusy = false;
+  }
+};
+
+const restartScheduledBackupTimer = () => {
+  clearScheduledBackupTimer();
+  const settings = scheduledBackupSettings.value;
+  if (!settings.enabled || !settings.directory) return;
+  scheduledBackupTimer = setInterval(() => { void runScheduledBackup(); }, settings.intervalMinutes * 60 * 1000);
+};
+
+const handleBackupSettingsChanged = (event: Event) => {
+  const next = (event as CustomEvent<ConfigBackupSettings>).detail;
+  if (next) {
+    scheduledBackupSettings.value = next;
+    restartScheduledBackupTimer();
+  }
+};
+
+const clearGitHubBackupTimer = () => {
+  if (githubBackupTimer) {
+    clearInterval(githubBackupTimer);
+    githubBackupTimer = null;
+  }
+};
+
+const runGitHubBackup = async () => {
+  const settings = githubBackupSettings.value;
+  if (githubBackupBusy || !settings.enabled || !settings.repository || !store.state.configRootDir) return;
+  githubBackupBusy = true;
+  try {
+    await uploadConfigBackup(store.state.configRootDir, settings);
+  } catch (error) {
+    // Scheduled jobs stay quiet; the next manual backup surfaces actionable errors.
+    console.error('[App] GitHub scheduled backup failed:', error);
+  } finally {
+    githubBackupBusy = false;
+  }
+};
+
+const restartGitHubBackupTimer = () => {
+  clearGitHubBackupTimer();
+  const settings = githubBackupSettings.value;
+  if (!settings.enabled || !settings.repository) return;
+  githubBackupTimer = setInterval(() => { void runGitHubBackup(); }, settings.intervalMinutes * 60 * 1000);
+};
+
+const handleGitHubBackupSettingsChanged = (event: Event) => {
+  const next = (event as CustomEvent<GitHubBackupSettings>).detail;
+  if (next) {
+    githubBackupSettings.value = next;
+    restartGitHubBackupTimer();
+  }
+};
+
+const flushBeforeClose = async () => {
+  if (closeSaveInProgress) return;
+  closeSaveInProgress = true;
+  try {
+    await flushShutdownSaves();
+    await runScheduledBackup();
+  } finally {
+    closeSaveInProgress = false;
+  }
+};
 
 // 处理 espanso 安装检测结果
 const handleInstallCheckComplete = (installed: boolean) => {
@@ -118,6 +222,12 @@ const needsConfigSelection = computed(() => {
 /** 发现新版本时的启动提醒弹窗 */
 const updateDialogOpen = ref(false);
 onMounted(async () => {
+  window.addEventListener(BACKUP_SETTINGS_CHANGED_EVENT, handleBackupSettingsChanged);
+  window.addEventListener(GITHUB_BACKUP_SETTINGS_CHANGED_EVENT, handleGitHubBackupSettingsChanged);
+  restartScheduledBackupTimer();
+  restartGitHubBackupTimer();
+  // Tauri close requests are cancellable, so async drafts can be flushed before exit.
+  unlistenCloseRequested = await platformService.onCloseRequested(flushBeforeClose);
   // 启动时后台检查 GitHub Releases；有新版本且未被「不再提醒」忽略时弹提醒
   if (userPreferences.preferences.checkUpdatesOnStartup) {
     const updates = useUpdateStore();
@@ -186,6 +296,15 @@ onMounted(async () => {
     store.initializeStore();
     }
   }
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener(BACKUP_SETTINGS_CHANGED_EVENT, handleBackupSettingsChanged);
+  window.removeEventListener(GITHUB_BACKUP_SETTINGS_CHANGED_EVENT, handleGitHubBackupSettingsChanged);
+  clearScheduledBackupTimer();
+  clearGitHubBackupTimer();
+  unlistenCloseRequested?.();
+  unlistenCloseRequested = null;
 });
 
 // --- 监听 Store 错误状态 ---

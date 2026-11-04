@@ -32,6 +32,15 @@
           {{ t('updates.download') }} {{ asset.name }} ({{ (asset.size / 1048576).toFixed(1) }} MB)
         </Button>
       </div>
+      <UpdateProgress
+        v-if="updates.downloading"
+        :percent="updates.percent"
+        :downloaded="updates.downloaded"
+        :total="updates.total"
+        :speed="updates.speed"
+        :remaining="updates.remaining"
+        :indeterminate="updates.indeterminate"
+      />
       <p class="text-xs text-muted-foreground">{{ t(assets.length ? 'updates.downloadHint' : 'updates.noAssets') }}</p>
     </template>
     <button class="text-sm text-primary underline" @click="open(RELEASES_URL)">{{ t('updates.releases') }}</button>
@@ -43,6 +52,7 @@ import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { toast } from 'vue-sonner';
 import { Button } from '@/components/ui/button';
+import UpdateProgress from '@/components/settings/UpdateProgress.vue';
 import { useUpdateStore } from '@/store/useUpdateStore';
 import { useUserPreferences } from '@/store/useUserPreferences';
 import { downloadableAssets, openReleaseUrl, RELEASES_URL } from '@/services/updateService';

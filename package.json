@@ -14,6 +14,7 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "typecheck": "vue-tsc --noEmit",
+    "sync:deskbox": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sync-deskbox.ps1",
     "test": "node scripts/test-editor.mjs && node scripts/test-snippet-list.mjs && node scripts/test-updates.mjs --offline"
   },
   "dependencies": {

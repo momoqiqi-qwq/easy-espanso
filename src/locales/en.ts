@@ -82,6 +82,7 @@ export default {
     dialogBody: 'You are on {current}; the latest release is {version}. Update automatically now or handle it later.',
     updateNow: 'Update now', skipVersion: 'Do not remind me',
     downloading: 'Downloading the installer…', installing: 'Starting the installer…',
+    downloadingPercent: 'Downloading the installer {percent}%', remaining: '{time} left',
     updated: 'The installer has started; the app will exit to finish updating.',
     skipped: 'Version {version} will not be announced again. A newer version will still be announced.',
     skipHint: '"Do not remind me" only skips this version; a newer version will be announced again.',

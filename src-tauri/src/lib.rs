@@ -9,6 +9,8 @@ use std::{
 };
 use tauri::Emitter;
 
+mod github_backup;
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct FileInfo {
@@ -106,7 +108,7 @@ async fn export_espanso_backup(request: BackupRequest) -> Result<String, String>
 /// 用备份目录替换目标目录：先把备份完整复制到暂存区，复制成功后再交换。
 /// 原实现先 remove_dir_all 再复制，复制中途失败（磁盘满、文件被占用）会让用户配置只剩一半。
 /// 暂存区放在配置根目录下（与目标同盘，rename 是原子的；Espanso 只读取 config/ 与 match/，不会加载暂存文件）。
-fn replace_dir_with_copy(source: &Path, target: &Path, staging_root: &Path, label: &str) -> Result<(), String> {
+pub(crate) fn replace_dir_with_copy(source: &Path, target: &Path, staging_root: &Path, label: &str) -> Result<(), String> {
     let staged = staging_root.join(format!("new-{label}"));
     let old = staging_root.join(format!("old-{label}"));
     if let Err(e) = copy_dir_recursive(source, &staged) {
@@ -1002,8 +1004,35 @@ fn update_dir() -> PathBuf {
     env::temp_dir().join("easy-espanso-updates")
 }
 
-/// Download a release asset into the update directory and return its absolute path.
-async fn download_update_asset_impl(url: &str, file_name: &str) -> Result<PathBuf, String> {
+/// 下载进度事件名：前端 listen 这个频道即可渲染进度条（不需要轮询命令）。
+const UPDATE_PROGRESS_EVENT: &str = "update-download-progress";
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateDownloadProgress {
+    downloaded: u64,
+    total: u64,
+    percent: f64,
+}
+
+/// 百分比保留一位小数；总长度未知时返回 0（前端据此走"不确定进度"样式）。
+fn download_percent(downloaded: u64, total: u64) -> f64 {
+    if total == 0 {
+        return 0.0;
+    }
+    let ratio = (downloaded.min(total) as f64 / total as f64) * 1000.0;
+    ratio.round() / 10.0
+}
+
+/// 下载一个发布资产到更新目录并返回绝对路径；`on_progress(已下载, 总长度)` 边下边回调。
+async fn download_update_asset_with_progress<F>(
+    url: &str,
+    file_name: &str,
+    mut on_progress: F,
+) -> Result<PathBuf, String>
+where
+    F: FnMut(u64, u64) + Send,
+{
     if !url.starts_with(UPDATE_ASSET_PREFIX) {
         return Err("更新地址不在受信任的发布范围内".into());
     }
@@ -1030,8 +1059,23 @@ async fn download_update_asset_impl(url: &str, file_name: &str) -> Result<PathBu
         .user_agent(concat!("easy-espanso/", env!("CARGO_PKG_VERSION")))
         .build().map_err(|e| e.to_string())?;
     let response = client.get(url).send().await.map_err(|e| format!("下载更新包失败: {e}"))?;
-    let response = response.error_for_status().map_err(|e| format!("下载更新包失败: {e}"))?;
-    let bytes = response.bytes().await.map_err(|e| format!("读取更新包失败: {e}"))?;
+    let mut response = response.error_for_status().map_err(|e| format!("下载更新包失败: {e}"))?;
+    // content-length 可能缺失（分块传输/代理剥离），此时 total = 0，前端显示"不确定进度"
+    let total = response.content_length().unwrap_or(0);
+    let mut downloaded: u64 = 0;
+    let mut bytes: Vec<u8> = Vec::with_capacity(total.min(64 * 1024 * 1024) as usize);
+    on_progress(0, total);
+    let mut last_emit = std::time::Instant::now();
+    while let Some(chunk) = response.chunk().await.map_err(|e| format!("读取更新包失败: {e}"))? {
+        downloaded += chunk.len() as u64;
+        bytes.extend_from_slice(&chunk);
+        // 限流：约每 120ms 一次，避免几 MB 的包把 IPC 事件刷爆
+        if last_emit.elapsed() >= std::time::Duration::from_millis(120) {
+            on_progress(downloaded, total);
+            last_emit = std::time::Instant::now();
+        }
+    }
+    on_progress(downloaded, if total == 0 { downloaded } else { total });
     if bytes.is_empty() {
         return Err("下载到的更新包为空".into());
     }
@@ -1044,11 +1088,27 @@ async fn download_update_asset_impl(url: &str, file_name: &str) -> Result<PathBu
     Ok(target)
 }
 
+/// 无进度回调的入口（回归测试与内部调用用）。
+#[allow(dead_code)]
+async fn download_update_asset_impl(url: &str, file_name: &str) -> Result<PathBuf, String> {
+    download_update_asset_with_progress(url, file_name, |_, _| {}).await
+}
+
 #[tauri::command]
-async fn download_update_asset(url: String, file_name: String) -> Result<String, String> {
-    download_update_asset_impl(&url, &file_name)
-        .await
-        .map(|path| path.to_string_lossy().into_owned())
+async fn download_update_asset(
+    app: tauri::AppHandle,
+    url: String,
+    file_name: String,
+) -> Result<String, String> {
+    let emitter = app.clone();
+    download_update_asset_with_progress(&url, &file_name, move |downloaded, total| {
+        let _ = emitter.emit(
+            UPDATE_PROGRESS_EVENT,
+            UpdateDownloadProgress { downloaded, total, percent: download_percent(downloaded, total) },
+        );
+    })
+    .await
+    .map(|path| path.to_string_lossy().into_owned())
 }
 
 /// Guard the installer path so only a package we downloaded into the update directory can run.
@@ -1186,7 +1246,16 @@ pub fn run() {
             get_espanso_status, control_espanso, open_in_explorer,
             get_executable_under_cursor, start_cursor_probe, stop_cursor_probe,
             export_espanso_backup, import_espanso_backup,
-            get_app_icon_base64, get_latest_release, download_update_asset, install_update_and_restart
+            get_app_icon_base64, get_latest_release, download_update_asset, install_update_and_restart,
+            github_backup::github_backup_save_token,
+            github_backup::github_backup_has_token,
+            github_backup::github_backup_clear_token,
+            github_backup::github_backup_validate_repository,
+            github_backup::github_backup_create_repository,
+            github_backup::github_backup_upload,
+            github_backup::github_backup_list,
+            github_backup::github_backup_delete,
+            github_backup::github_backup_restore
         ])
         .run(tauri::generate_context!())
         .expect("error while running Easy Espanso");
@@ -1275,5 +1344,17 @@ mod update_tests {
         }
         assert!(resolve_update_package("C:/Windows/System32/notepad.exe").is_err());
         assert!(resolve_update_package("C:/definitely/missing/setup.exe").is_err());
+    }
+
+    /// 进度百分比：总长未知给 0（前端走"不确定进度"），有总长时四舍五入到 0.1 并封顶 100。
+    #[test]
+    fn percent_is_clamped_and_rounded() {
+        assert_eq!(download_percent(0, 0), 0.0);
+        assert_eq!(download_percent(5, 0), 0.0);
+        assert_eq!(download_percent(0, 200), 0.0);
+        assert_eq!(download_percent(100, 200), 50.0);
+        assert_eq!(download_percent(1, 3), 33.3);
+        assert_eq!(download_percent(500, 200), 100.0);
+        assert_eq!(download_percent(2_000_000, 5_000_000), 40.0);
     }
 }

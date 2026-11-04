@@ -47,6 +47,8 @@ export interface IPlatformAdapter {
   openInExplorer(filePath: string): Promise<boolean>; // 在文件管理器中打开文件或文件夹
   exportEspansoBackup(sourceRoot: string, targetRoot: string): Promise<string>;
   importEspansoBackup(backupRoot: string, targetRoot: string, preserveMatches: boolean): Promise<void>;
+  /** Subscribe to the native window close request (Tauri only). */
+  onCloseRequested?(callback: () => void | Promise<void>): Promise<() => void>;
 
   // --- YAML 操作 ---
   parseYaml(content: string): Promise<YamlData>;

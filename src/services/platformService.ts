@@ -282,6 +282,12 @@ export async function importEspansoBackup(backupRoot: string, targetRoot: string
     return adapter.importEspansoBackup(backupRoot, targetRoot, preserveMatches);
 }
 
+export async function onCloseRequested(callback: () => void | Promise<void>): Promise<() => void> {
+  const adapter = PlatformAdapterFactory.getInstance();
+  if (typeof adapter.onCloseRequested !== 'function') return () => undefined;
+  return adapter.onCloseRequested(callback);
+}
+
 // 注意: parseYaml 和 serializeYaml 现在应该在 yamlService.ts 中
 // 注意: getEspansoConfigDir 和 getDefaultConfigPath 的逻辑现在应该在 configService.ts 中
 

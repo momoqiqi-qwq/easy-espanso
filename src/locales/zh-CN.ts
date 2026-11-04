@@ -82,6 +82,7 @@ export default {
     dialogBody: '当前版本 {current}，最新版本 {version}。可以立即自动更新，或稍后自行处理。',
     updateNow: '自动更新', skipVersion: '不再提醒',
     downloading: '正在下载安装包…', installing: '正在启动安装程序…',
+    downloadingPercent: '正在下载安装包 {percent}%', remaining: '剩余 {time}',
     updated: '安装程序已启动，应用将退出以完成更新。',
     skipped: '已不再提醒版本 {version}，出现更高版本时仍会提醒。',
     skipHint: '「不再提醒」只忽略这个版本，出现更高版本时仍会提醒。',

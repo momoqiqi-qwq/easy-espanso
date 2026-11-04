@@ -245,6 +245,10 @@ export class WebAdapter implements IPlatformAdapter {
     async exportEspansoBackup(_sourceRoot: string, _targetRoot: string): Promise<string> { throw new Error('Web mode does not support filesystem backups.'); }
   async importEspansoBackup(_backupRoot: string, _targetRoot: string, _preserveMatches: boolean): Promise<void> { throw new Error('Web mode does not support filesystem backups.'); }
 
+    async onCloseRequested(_callback: () => void | Promise<void>): Promise<() => void> {
+        return () => undefined;
+    }
+
   async parseYaml(content: string): Promise<YamlData> {
         if (typeof jsyaml !== 'undefined' && typeof jsyaml.load === 'function') {
             try {

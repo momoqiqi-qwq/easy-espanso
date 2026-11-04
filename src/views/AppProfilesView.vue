@@ -260,6 +260,7 @@ import * as appSpecificConfigService from '@/services/appSpecificConfigService';
 import type { Match } from '@/types/core/espanso.types';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { registerShutdownSaveHandler } from '@/services/shutdownSaveService';
 
 const router = useRouter();
 const route = useRoute();
@@ -328,6 +329,7 @@ const pickingTarget = ref<EditableAppConfig | null>(null);
 const liveTarget = ref<{ path: string; name: string } | null>(null);
 let unlistenCursorTarget: UnlistenFn | null = null;
 let unlistenCursorEnd: UnlistenFn | null = null;
+let unregisterShutdownSave: (() => void) | null = null;
 
 // 只注册一次监听：cursor-target 负责实时预览，cursor-target-end 由后端在“左键松手”时发出
 async function ensureCursorListeners() {
@@ -495,6 +497,11 @@ watch(() => store.state.configRootDir, reload);
 
 // 拾取期间监听 Esc 取消；组件卸载时清掉监听并确保探测线程停下
 onMounted(() => window.addEventListener('keydown', onPickerKeydown, true));
+onMounted(() => {
+  unregisterShutdownSave = registerShutdownSaveHandler(async () => {
+    if (editing.value) await persistEditing();
+  });
+});
 onUnmounted(() => {
   window.removeEventListener('keydown', onPickerKeydown, true);
   unlistenCursorTarget?.();
@@ -504,6 +511,8 @@ onUnmounted(() => {
   clearAutoSaveTimer();
   clearAutoSaveHint();
   void stopCursorProbe();
+  unregisterShutdownSave?.();
+  unregisterShutdownSave = null;
 });
 
 const label = (value: string) => value === 'filter_exec' ? '程序' : value === 'filter_class' ? '窗口类' : '标题';

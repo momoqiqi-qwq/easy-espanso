@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { open, save, confirm, message } from '@tauri-apps/plugin-dialog';
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
 import { openUrl } from '@tauri-apps/plugin-opener';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import * as yaml from 'js-yaml';
 import type { IPlatformAdapter } from './IPlatformAdapter';
 import type {
@@ -139,6 +140,22 @@ export class TauriAdapter implements IPlatformAdapter {
 
   async importEspansoBackup(backupRoot: string, targetRoot: string, preserveMatches: boolean): Promise<void> {
     await invoke('import_espanso_backup', { request: { backupRoot, targetRoot, preserveMatches } });
+  }
+
+  async onCloseRequested(callback: () => void | Promise<void>): Promise<() => void> {
+    let closing = false;
+    const currentWindow = getCurrentWindow();
+    return currentWindow.onCloseRequested(async (event) => {
+      // Keep the native window alive until async drafts and the final backup finish.
+      if (closing) return;
+      closing = true;
+      event.preventDefault();
+      try {
+        await callback();
+      } finally {
+        await currentWindow.close();
+      }
+    });
   }
 
   async parseYaml(content: string): Promise<YamlData> {

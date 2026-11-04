@@ -520,6 +520,7 @@ import { useI18n } from "vue-i18n";
 import { useEspansoStore } from "../../store/useEspansoStore";
 import { useFormStore } from "../../store/useFormStore";
 import { useUserPreferences } from "../../store/useUserPreferences";
+import { registerShutdownSaveHandler } from '@/services/shutdownSaveService';
 import { toast } from "vue-sonner";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -643,6 +644,7 @@ const emit = defineEmits<{
 // 获取 store
 const store = useEspansoStore();
 const userPreferences = useUserPreferences();
+let unregisterShutdownSave: (() => void) | null = null;
 const formStore = useFormStore();
 const choicesOpen = ref(false);
 const mergeOpen = ref(false);
@@ -1422,6 +1424,8 @@ const onCancel = () => {
 // 组件卸载前检查未保存的修改
 onBeforeUnmount(() => {
   // 确保组件卸载时重置全局状态
+  unregisterShutdownSave?.();
+  unregisterShutdownSave = null;
   setGlobalDirty(false);
   stopHotkeyRecording();
 });
@@ -1972,6 +1976,14 @@ onMounted(() => {
 
     // 确保下一轮DOM更新后应用主题
     nextTick(applyThemeToCodeMirror);
+  });
+});
+
+// Tauri 关机/关闭窗口前，强制冲刷当前片段草稿，即使用户关闭了普通自动保存。
+onMounted(() => {
+  unregisterShutdownSave = registerShutdownSaveHandler(async () => {
+    while (isSaving.value) await new Promise((resolve) => setTimeout(resolve, 25));
+    if (isFormModified.value) await autoSave({ showToast: true });
   });
 });
 

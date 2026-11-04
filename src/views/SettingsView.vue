@@ -987,6 +987,97 @@
               </div>
             </div>
           </div>
+
+          <!-- 定时配置备份 -->
+          <div v-if="activeCategory === 'advanced'" class="mb-5 rounded-lg border p-4">
+            <h3 class="font-semibold mb-2">定时自动保存配置</h3>
+            <p class="text-sm text-muted-foreground mb-4">按指定间隔把 config、match 和 packages 复制到备份文件夹；应用关闭前也会先保存当前编辑。</p>
+            <div class="grid grid-cols-2 gap-4">
+              <div class="flex items-center gap-2">
+                <Checkbox id="scheduled-config-backup" :model-value="scheduledBackup.enabled" @update:model-value="(value) => updateScheduledBackupSettings({ enabled: Boolean(value) })" />
+                <Label for="scheduled-config-backup">启用定时备份</Label>
+              </div>
+              <div class="form-item">
+                <Label for="scheduled-backup-interval">备份间隔</Label>
+                <Select :model-value="String(scheduledBackup.intervalMinutes)" @update:model-value="(value) => updateScheduledBackupSettings({ intervalMinutes: Number(value) as ConfigBackupSettings['intervalMinutes'] })">
+                  <SelectTrigger id="scheduled-backup-interval" class="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="5">每 5 分钟</SelectItem>
+                    <SelectItem value="15">每 15 分钟</SelectItem>
+                    <SelectItem value="30">每 30 分钟</SelectItem>
+                    <SelectItem value="60">每 1 小时</SelectItem>
+                    <SelectItem value="1440">每天</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div class="form-item col-span-2">
+                <Label>备份文件夹</Label>
+                <div class="flex gap-2">
+                  <Input :model-value="scheduledBackup.directory" readonly placeholder="尚未选择文件夹" class="flex-1" />
+                  <Button type="button" variant="outline" @click="chooseScheduledBackupDirectory">选择文件夹</Button>
+                </div>
+                <p class="text-xs text-muted-foreground mt-1">每次备份会新建带时间戳的子文件夹，不会覆盖旧备份。</p>
+              </div>
+            </div>
+            <div class="flex items-center gap-2 mt-4">
+              <Button type="button" variant="outline" :disabled="backupBusy || !scheduledBackup.directory || !store.state.configRootDir" @click="runScheduledBackup(false, true)">立即备份</Button>
+              <span v-if="scheduledBackup.enabled && scheduledBackup.directory" class="text-xs text-muted-foreground">定时备份已启用</span>
+            </div>
+          </div>
+
+          <!-- GitHub 远端备份 -->
+          <div v-if="activeCategory === 'advanced'" class="mb-5 rounded-lg border p-4">
+            <h3 class="font-semibold mb-2">GitHub 远端备份</h3>
+            <p class="text-sm text-muted-foreground mb-4">
+              使用私有仓库存储 Easy Espanso 配置。PAT 只保存在本机安全存储中，不会写入配置文件或日志。
+            </p>
+            <div class="grid grid-cols-2 gap-4">
+              <div class="form-item col-span-2">
+                <Label for="github-backup-repository">GitHub 仓库</Label>
+                <Input id="github-backup-repository" v-model="githubBackup.repository" placeholder="https://github.com/owner/repository.git" />
+                <p class="text-xs text-muted-foreground mt-1">首次连接可自动创建私有仓库 Backup-EasyEspanso。</p>
+              </div>
+              <div class="form-item">
+                <Label for="github-backup-branch">分支</Label>
+                <Input id="github-backup-branch" v-model="githubBackup.branch" placeholder="main" />
+              </div>
+              <div class="form-item">
+                <Label for="github-backup-token">Personal Access Token</Label>
+                <Input id="github-backup-token" v-model="githubBackupTokenInput" type="password" autocomplete="off" placeholder="连接时输入，不会显示旧 Token" />
+                <p class="text-xs text-muted-foreground mt-1">PAT 需要创建私有仓库及 Contents 读写权限；令牌不会写入配置文件或日志。</p>
+              </div>
+              <div class="flex items-center gap-2 col-span-2">
+                <Checkbox id="github-backup-enabled" :model-value="githubBackup.enabled" @update:model-value="(value) => updateGitHubBackupSettings({ enabled: Boolean(value) })" />
+                <Label for="github-backup-enabled">启用定时远端备份</Label>
+                <Select :model-value="String(githubBackup.intervalMinutes)" @update:model-value="(value) => updateGitHubBackupSettings({ intervalMinutes: Number(value) as GitHubBackupSettings['intervalMinutes'] })">
+                  <SelectTrigger id="github-backup-interval" class="w-36"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="15">每 15 分钟</SelectItem>
+                    <SelectItem value="60">每 1 小时</SelectItem>
+                    <SelectItem value="360">每 6 小时</SelectItem>
+                    <SelectItem value="1440">每天</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div class="flex flex-wrap items-center gap-2 mt-4">
+              <Button type="button" variant="outline" :disabled="githubBackupBusy" @click="connectGitHubBackup">连接并验证</Button>
+              <Button type="button" variant="outline" :disabled="githubBackupBusy" @click="createGitHubBackupRepository">自动创建私有仓库</Button>
+              <Button type="button" variant="outline" :disabled="githubBackupBusy || !githubBackup.repository || !store.state.configRootDir" @click="backupToGitHub">立即备份</Button>
+              <Button type="button" variant="outline" :disabled="githubBackupBusy || !githubBackup.repository" @click="refreshGitHubBackups">查看历史</Button>
+              <Button type="button" variant="ghost" class="text-destructive" :disabled="githubBackupBusy" @click="disconnectGitHubBackup">断开连接</Button>
+            </div>
+            <div v-if="githubBackupBackups.length" class="mt-4 space-y-2">
+              <div v-for="entry in githubBackupBackups.slice(0, 5)" :key="entry.path" class="flex flex-wrap items-center justify-between gap-2 rounded border px-3 py-2 text-xs">
+                <span class="truncate" :title="entry.path">{{ entry.name }}</span>
+                <div class="flex items-center gap-2">
+                  <Button type="button" variant="outline" size="sm" :disabled="githubBackupBusy || !store.state.configRootDir" @click="restoreFromGitHub(entry)">恢复</Button>
+                  <Button type="button" variant="ghost" size="sm" class="text-destructive" :disabled="githubBackupBusy || !store.state.configRootDir" @click="deleteFromGitHub(entry)">删除</Button>
+                </div>
+              </div>
+            </div>
+            <p v-if="githubBackupStatus" class="mt-3 text-xs text-muted-foreground">{{ githubBackupStatus }}</p>
+          </div>
           <!-- 高级设置 -->
           <div v-if="activeCategory === 'advanced'" class="grid grid-cols-2 gap-4">
             <div class="form-item">
@@ -1267,6 +1358,29 @@ import AppUpdatePanel from '@/components/settings/AppUpdatePanel.vue';
 import type { AccentColor, FontScale, ScrollbarSize, ToastDuration, ToastPosition, HistoryLimit } from '@/store/useUserPreferences';
 import * as workspaceService from '@/services/workspaceService';
 import * as platformService from '@/services/platformService';
+import {
+  createConfigBackup,
+  loadConfigBackupSettings,
+  saveConfigBackupSettings,
+  type ConfigBackupSettings,
+} from '@/services/configBackupService';
+import {
+  clearGitHubBackupSettings,
+  clearGitHubBackupToken,
+  createOrConnectDefaultRepository,
+  deleteConfigBackup,
+  listConfigBackups,
+  loadGitHubBackupSettings,
+  loadGitHubBackupToken,
+  restoreConfigBackup,
+  saveGitHubBackupSettings,
+  saveGitHubBackupToken,
+  uploadConfigBackup,
+  verifyGitHubRepository,
+  type GitHubBackupEntry,
+  type GitHubBackupSettings,
+} from '@/services/githubBackupService';
+import { registerShutdownSaveHandler } from '@/services/shutdownSaveService';
 import { VueDraggable } from 'vue-draggable-plus';
 import type { DragActivationDelay, MiddlePaneWidth, TreeIndentSize, SidebarRouteId } from '@/store/useUserPreferences';
 
@@ -1433,6 +1547,153 @@ const resetInterfacePreferencesSafely = () => {
 const backupBusy = ref(false);
 const preserveCurrentMatches = ref(true);
 const packagesFolderPath = ref('');
+const scheduledBackup = ref<ConfigBackupSettings>(loadConfigBackupSettings());
+let unregisterShutdownSave: (() => void) | null = null;
+const githubBackup = ref<GitHubBackupSettings>(loadGitHubBackupSettings());
+const githubBackupTokenInput = ref('');
+const githubBackupBackups = ref<GitHubBackupEntry[]>([]);
+const githubBackupBusy = ref(false);
+const githubBackupStatus = ref('');
+
+const updateGitHubBackupSettings = (patch: Partial<GitHubBackupSettings>) => {
+  githubBackup.value = saveGitHubBackupSettings({ ...githubBackup.value, ...patch });
+};
+
+const connectGitHubBackup = async () => {
+  try {
+    githubBackupBusy.value = true;
+    const root = store.state.configRootDir;
+    if (!root) throw new Error('请先加载 Espanso 配置目录');
+    if (githubBackupTokenInput.value.trim()) await saveGitHubBackupToken(root, githubBackupTokenInput.value);
+    if (!await loadGitHubBackupToken(root)) throw new Error('请提供 GitHub PAT');
+    const info = await verifyGitHubRepository(root, githubBackup.value.repository);
+    githubBackup.value = saveGitHubBackupSettings({ repository: info.repository, branch: info.branch });
+    githubBackupTokenInput.value = '';
+    githubBackupStatus.value = `已连接 ${info.repository}${info.private ? '（Private）' : '（警告：当前仓库不是 Private）'}`;
+    await refreshGitHubBackups();
+  } catch (error: any) {
+    githubBackupStatus.value = error?.message || String(error);
+    toast.error(githubBackupStatus.value);
+  } finally {
+    githubBackupBusy.value = false;
+  }
+};
+
+const createGitHubBackupRepository = async () => {
+  try {
+    githubBackupBusy.value = true;
+    const root = store.state.configRootDir;
+    if (!root) throw new Error('请先加载 Espanso 配置目录');
+    if (githubBackupTokenInput.value.trim()) await saveGitHubBackupToken(root, githubBackupTokenInput.value);
+    if (!await loadGitHubBackupToken(root)) throw new Error('创建私有仓库需要 GitHub PAT');
+    const info = await createOrConnectDefaultRepository(root);
+    githubBackup.value = saveGitHubBackupSettings({ repository: info.repository, branch: info.branch });
+    githubBackupTokenInput.value = '';
+    githubBackupStatus.value = `已连接 ${info.repository}（Private）`;
+    await refreshGitHubBackups();
+  } catch (error: any) {
+    githubBackupStatus.value = error?.message || String(error);
+    toast.error(githubBackupStatus.value);
+  } finally {
+    githubBackupBusy.value = false;
+  }
+};
+
+const backupToGitHub = async () => {
+  if (!store.state.configRootDir) return toast.error('请先加载 Espanso 配置目录');
+  try {
+    githubBackupBusy.value = true;
+    const entry = await uploadConfigBackup(store.state.configRootDir, githubBackup.value);
+    githubBackupStatus.value = `远端备份完成：${entry.name}`;
+    toast.success('GitHub 备份已完成');
+    await refreshGitHubBackups();
+  } catch (error: any) {
+    githubBackupStatus.value = error?.message || String(error);
+    toast.error(githubBackupStatus.value);
+  } finally {
+    githubBackupBusy.value = false;
+  }
+};
+
+const refreshGitHubBackups = async () => {
+  if (!githubBackup.value.repository || !store.state.configRootDir) return;
+  try {
+    const entries = await listConfigBackups(store.state.configRootDir, githubBackup.value);
+    githubBackupBackups.value = entries;
+    githubBackupStatus.value = entries.length ? `找到 ${entries.length} 个本机备份` : '暂无远端备份';
+  } catch (error: any) {
+    githubBackupStatus.value = error?.message || String(error);
+  }
+};
+
+const restoreFromGitHub = async (entry: GitHubBackupEntry) => {
+  if (!store.state.configRootDir) return toast.error('请先加载 Espanso 配置目录');
+  const preserve = preserveCurrentMatches.value;
+  if (!window.confirm(preserve ? '恢复 config 和 packages，并保留当前片段？' : '恢复 config、packages 和 match？当前片段可能被覆盖。')) return;
+  try {
+    githubBackupBusy.value = true;
+    await restoreConfigBackup(entry, store.state.configRootDir, githubBackup.value, preserve);
+    await store.loadConfig(store.state.configRootDir);
+    toast.success('GitHub 备份已恢复');
+  } catch (error: any) {
+    toast.error(`恢复失败：${error?.message || error}`);
+  } finally {
+    githubBackupBusy.value = false;
+  }
+};
+
+const deleteFromGitHub = async (entry: GitHubBackupEntry) => {
+  if (!store.state.configRootDir) return toast.error('请先加载 Espanso 配置目录');
+  if (!window.confirm(`确认从 GitHub 永久删除备份“${entry.name}”？此操作不可撤销。`)) return;
+  try {
+    githubBackupBusy.value = true;
+    await deleteConfigBackup(entry, store.state.configRootDir, githubBackup.value);
+    githubBackupBackups.value = githubBackupBackups.value.filter((item) => item.path !== entry.path);
+    githubBackupStatus.value = '远端备份已删除';
+    toast.success('GitHub 备份已删除');
+  } catch (error: any) {
+    toast.error(`删除失败：${error?.message || error}`);
+  } finally {
+    githubBackupBusy.value = false;
+  }
+};
+
+const disconnectGitHubBackup = async () => {
+  if (!window.confirm('断开 GitHub 备份并删除本机 Token？')) return;
+  if (store.state.configRootDir) await clearGitHubBackupToken(store.state.configRootDir);
+  githubBackup.value = clearGitHubBackupSettings();
+  githubBackupTokenInput.value = '';
+  githubBackupBackups.value = [];
+  githubBackupStatus.value = 'GitHub 备份已断开';
+};
+
+const runScheduledBackup = async (silent = true, force = false) => {
+  if (backupBusy.value || (!force && !scheduledBackup.value.enabled) || !scheduledBackup.value.directory || !store.state.configRootDir) return;
+  try {
+    backupBusy.value = true;
+    await createConfigBackup(store.state.configRootDir, scheduledBackup.value.directory);
+    if (!silent) toast.success('配置备份已完成');
+  } catch (error: any) {
+    console.error('[SettingsView] 定时配置备份失败:', error);
+    if (!silent) toast.error(`配置备份失败：${error?.message || error}`);
+  } finally {
+    backupBusy.value = false;
+  }
+};
+
+const updateScheduledBackupSettings = (patch: Partial<ConfigBackupSettings>) => {
+  scheduledBackup.value = saveConfigBackupSettings({ ...scheduledBackup.value, ...patch });
+};
+
+const chooseScheduledBackupDirectory = async () => {
+  const selected = await platformService.showOpenDialog({
+    title: '选择定时备份文件夹',
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  if (!selected.canceled && selected.filePaths[0]) {
+    updateScheduledBackupSettings({ directory: selected.filePaths[0] });
+  }
+};
 
 const resolvePackagesFolder = async () => {
   const root = store.state.configRootDir;
@@ -1468,8 +1729,14 @@ const exportFullBackup = async () => {
   if (!store.state.configRootDir) return toast.error('请先加载 Espanso 配置目录');
   try {
     backupBusy.value = true;
-    const selected = await platformService.showOpenDialog({ title: '选择导出到哪个文件夹', properties: ['openDirectory', 'createDirectory'] });
+    const selected = await platformService.showOpenDialog({
+      title: '选择导出到哪个文件夹',
+      defaultPath: scheduledBackup.value.directory || undefined,
+      properties: ['openDirectory', 'createDirectory'],
+    });
     if (selected.canceled || !selected.filePaths[0]) return;
+    // Remember the last export location so the next manual export and scheduled backup use it.
+    scheduledBackup.value = saveConfigBackupSettings({ directory: selected.filePaths[0] });
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const target = await platformService.joinPath(selected.filePaths[0], `easy-espanso-backup-${stamp}`);
     const exported = await platformService.exportEspansoBackup(store.state.configRootDir, target);
@@ -1683,6 +1950,13 @@ onMounted(() => {
   console.log(`[SettingsView] 初始语言: ${locale.value}, 可用语言: ${availableLocales.join(', ')}`);
   console.log(`[SettingsView] localStorage中的语言设置: ${localStorage.getItem('espanso-language')}`);
   loadConfig();
+  unregisterShutdownSave = registerShutdownSaveHandler(async () => {
+    // Flush a pending settings draft first, then create a final backup when enabled.
+    if (hasChanges.value && !hasEmptyNumericSetting()) {
+      clearSettingsAutoSaveTimer();
+      await persistSettings();
+    }
+  });
 });
 
 // 错误捕获
@@ -1944,10 +2218,10 @@ watch(localConfig, scheduleSettingsAutoSave, { deep: true });
 
 // 离开设置页前把挂起的改动冲刷掉，别丢掉最后一次输入
 onBeforeUnmount(() => {
-  if (!settingsAutoSaveTimer) return;
   clearSettingsAutoSaveTimer();
-  if (!hasChanges.value || hasEmptyNumericSetting()) return;
-  void persistSettings();
+  unregisterShutdownSave?.();
+  unregisterShutdownSave = null;
+  if (hasChanges.value && !hasEmptyNumericSetting()) void persistSettings();
 });
 
 // 重置为默认值

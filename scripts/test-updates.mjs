@@ -10,6 +10,7 @@ new Function('require', 'exports', compiled)(() => ({}), exports);
 const {
   isNewerVersion, downloadableAssets, openReleaseUrl,
   pickInstallerAsset, isVersionSkipped, normalizeVersion,
+  formatBytes, formatDuration, downloadPercent, UPDATE_PROGRESS_EVENT,
 } = exports;
 
 let checks = 0;
@@ -52,6 +53,41 @@ check('isVersionSkipped', () => {
   assert.equal(isVersionSkipped('v1.3.1', ''), false);
   assert.equal(isVersionSkipped('v1.3.1', undefined), false);
   assert.equal(normalizeVersion(' v1.3.0 '), '1.3.0');
+});
+
+// --- 下载进度：百分比 / 体积 / 剩余时间的展示口径 ---
+check('downloadPercent', () => {
+  assert.equal(downloadPercent(0, 0), 0, 'unknown total must not claim progress');
+  assert.equal(downloadPercent(50, 0), 0);
+  assert.equal(downloadPercent(0, 1000), 0);
+  assert.equal(downloadPercent(500, 1000), 50);
+  assert.equal(downloadPercent(999, 1000), 100, 'rounds up near the end');
+  assert.equal(downloadPercent(2000, 1000), 100, 'never exceeds 100');
+});
+
+check('formatBytes', () => {
+  assert.equal(formatBytes(0), '0 B');
+  assert.equal(formatBytes(-1), '0 B');
+  assert.equal(formatBytes(512), '512 B');
+  assert.equal(formatBytes(1536), '1.5 KB');
+  assert.equal(formatBytes(5 * 1024 * 1024), '5 MB');
+  assert.equal(formatBytes(150 * 1024 * 1024), '150 MB');
+});
+
+check('formatDuration', () => {
+  assert.equal(formatDuration(0), '');
+  assert.equal(formatDuration(-3), '');
+  assert.equal(formatDuration(12), '12s');
+  assert.equal(formatDuration(60), '1m');
+  assert.equal(formatDuration(80), '1m 20s');
+  assert.equal(formatDuration(3600), '1h');
+  assert.equal(formatDuration(3900), '1h 5m');
+});
+
+check('progress event name stays in sync with the Rust side', () => {
+  const rust = fs.readFileSync(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8');
+  assert.ok(rust.includes(`"${UPDATE_PROGRESS_EVENT}"`), `lib.rs must emit ${UPDATE_PROGRESS_EVENT}`);
+  assert.ok(rust.includes('content_length'), 'progress needs the response content length');
 });
 
 // --- 下载地址白名单 ---

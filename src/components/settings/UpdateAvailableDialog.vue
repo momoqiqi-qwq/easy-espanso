@@ -13,6 +13,15 @@
           class="max-h-44 overflow-auto rounded-md border bg-muted/40 p-3 text-xs whitespace-pre-wrap font-sans">{{ release.body }}</pre>
         <p v-if="!updates.installer" class="text-sm text-muted-foreground">{{ t('updates.noInstaller') }}</p>
         <p v-if="updates.error" class="text-sm text-destructive">{{ t('updates.failed') }}: {{ updates.error }}</p>
+        <UpdateProgress
+          v-if="updates.downloading"
+          :percent="updates.percent"
+          :downloaded="updates.downloaded"
+          :total="updates.total"
+          :speed="updates.speed"
+          :remaining="updates.remaining"
+          :indeterminate="updates.indeterminate"
+        />
         <p class="text-xs text-muted-foreground">{{ t('updates.skipHint') }}</p>
       </div>
 
@@ -34,6 +43,7 @@ import { useI18n } from 'vue-i18n';
 import { toast } from 'vue-sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import UpdateProgress from '@/components/settings/UpdateProgress.vue';
 import { useUpdateStore } from '@/store/useUpdateStore';
 
 const props = defineProps<{ open: boolean }>();
