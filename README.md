@@ -1,12 +1,14 @@
 <div align="center">
 
-<img src="./assets/readme-hero.svg" alt="easy-espanso" width="1000" />
+<img src="./assets/hero.svg" alt="easy-espanso" width="1000" />
 
 **Espanso 可视化配置管理工具，支持文本片段、命令行、脚本、网页、文件夹和应用专属规则，基于 Tauri 2 + …**
 
 [![stars](https://img.shields.io/github/stars/momoqiqi-qwq/easy-espanso?style=for-the-badge&color=f5c518&labelColor=2b2b2b)](https://github.com/momoqiqi-qwq/easy-espanso/stargazers) ![license](https://img.shields.io/github/license/momoqiqi-qwq/easy-espanso?style=for-the-badge&color=3da639) ![Vue 3](https://img.shields.io/badge/Vue%203-41B883?style=for-the-badge&logo=vuedotjs&logoColor=white) ![Tauri 2](https://img.shields.io/badge/Tauri%202-24C8DB?style=for-the-badge&logo=tauri&logoColor=white)
 
 </div>
+
+---
 
 <details open>
 <summary><b>目录</b></summary>
