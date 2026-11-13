@@ -8,7 +8,7 @@
 
 </div>
 
-<details>
+<details open>
 <summary><b>目录</b></summary>
 
 - [功能介绍](#功能介绍)
@@ -22,6 +22,8 @@
 - [🚀 开发过程洞察](#开发过程洞察)
 
 </details>
+
+---
 
 ---
 
