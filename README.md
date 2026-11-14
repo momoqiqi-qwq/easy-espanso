@@ -25,18 +25,6 @@
 
 ---
 
----
-
----
-
----
-
----
-
----
-
----
-
 # Easy Espanso
 
 [![构建状态](https://img.shields.io/github/actions/workflow/status/momoqiqi-qwq/easy-espanso/release.yml?branch=main)](https://github.com/momoqiqi-qwq/easy-espanso/actions/workflows/release.yml)
